@@ -19,5 +19,6 @@ from . import views
 
 urlpatterns = [
    path('signin/', views.SignIn.as_view()),
+   path('verify_otp/', views.VerifyOTP.as_view()),
    path('home/', views.Home.as_view())
 ]
