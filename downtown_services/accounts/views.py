@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser
+from .models import CustomUser, UserProfile
 
 import random
 from django.conf import settings
@@ -20,14 +20,16 @@ def generate_otp():
     otp = random.randint(100000, 999999)
     return otp
 
-def token_generation_and_set_in_cookie(user):
+def token_generation_and_set_in_cookie(user, additional_data=None):
     refresh = RefreshToken.for_user(user)
     refresh["email"] = str(user.email)
     content = {
-        'isAdmin': user.is_superuser,
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
+        'isActive': user.is_active,
+        'email':user.email,
     }
+
+    if additional_data:
+        content.update(additional_data)
 
     response = Response(content, status=status.HTTP_200_OK)
     response.set_cookie(
@@ -110,14 +112,48 @@ class VerifyOTP(APIView):
 class SignInWithGoogle(APIView):
     permission_classes  = [permissions.AllowAny]
     def post(self, request):
+        print(request.data, 'ddd')
         email = request.data['email']
         try:
             user = CustomUser.objects.get(email=email)
         except:
             user = CustomUser.objects.create_user(email=email)
             user.save()
-        response = token_generation_and_set_in_cookie(user)
+            profile = UserProfile.objects.create(
+                    user=user, 
+                    first_name=request.data['given_name'], 
+                    last_name=request.data['family_name'],
+                    profile_pic=request.data['picture'],
+                )
+            profile.save()
+        additional_data = {
+            'first_name': request.data.get('given_name', ''),
+            'last_name': request.data.get('family_name', ''),
+            'profile_pic': request.data.get('picture', '')
+        }
+        response = token_generation_and_set_in_cookie(user, additional_data)
         return response
+
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        print(request,'llll',request.COOKIES)
+        try:
+            refresh_token = request.COOKIES.get("refresh_token")
+            print(refresh_token,'token')
+            token = RefreshToken(refresh_token)
+            print('000')
+            token.blacklist()
+            print('pppp')
+            response = Response(status=status.HTTP_205_RESET_CONTENT)
+            print(';;')
+            response.delete_cookie('refresh_token')
+            response.delete_cookie('access_token')
+            response.delete_cookie('csrftoken')
+            print('finished')
+            return response
+        except Exception as e:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
         
 
 class Home(APIView):

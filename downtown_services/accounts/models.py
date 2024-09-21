@@ -56,8 +56,8 @@ class UserProfile(models.Model):
     user = models.OneToOneField(CustomUser, on_delete = models.CASCADE, related_name = 'user_profile' )
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
-    dob = models.DateField()
-    gender = models.CharField(max_length=10)
+    dob = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=10, null=True, blank=True)
     profile_pic = models.ImageField(upload_to = 'user/profile_pic/', null=True, blank=True)
 
     def __str__(self):
