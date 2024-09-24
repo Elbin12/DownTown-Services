@@ -11,6 +11,8 @@ from django.conf import settings
 
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.parsers import MultiPartParser, FormParser
+from .serializer import ProfileSerializer, UserGetSerializer
 
 
 # Create your views here.
@@ -51,6 +53,7 @@ def token_generation_and_set_in_cookie(user, additional_data=None):
 class SignIn(APIView):
     permission_classes = [permissions.AllowAny]
     def post(self, request):
+        print(request.data, 'lll')
         email = request.data['email']
         mob = request.data['mob']
         print(request.data, 'lll')
@@ -94,6 +97,11 @@ class VerifyOTP(APIView):
         session_otp = request.session.get('otp')
         email = request.session.get('email')
         mob = request.session.get('mob')
+        print(email, mob, 'mob')
+        if not mob:
+            mob = None
+        if not email:
+            email = None
         if session_otp is not None:
             if str(session_otp) == otp:
                 del request.session['otp']
@@ -116,6 +124,10 @@ class SignInWithGoogle(APIView):
         email = request.data['email']
         try:
             user = CustomUser.objects.get(email=email)
+            user_profile = UserProfile.objects.get(user=user)
+            serializer = UserGetSerializer(user_profile)
+            additional_data = serializer.data
+            print('hello')
         except:
             user = CustomUser.objects.create_user(email=email)
             user.save()
@@ -126,11 +138,11 @@ class SignInWithGoogle(APIView):
                     profile_pic=request.data['picture'],
                 )
             profile.save()
-        additional_data = {
-            'first_name': request.data.get('given_name', ''),
-            'last_name': request.data.get('family_name', ''),
-            'profile_pic': request.data.get('picture', '')
-        }
+            additional_data = {
+                'first_name': request.data.get('given_name', ''),
+                'last_name': request.data.get('family_name', ''),
+                'profile_pic': request.data.get('picture', '')
+            }
         response = token_generation_and_set_in_cookie(user, additional_data)
         return response
 
@@ -154,6 +166,39 @@ class LogoutView(APIView):
             return response
         except Exception as e:
             return Response(status=status.HTTP_400_BAD_REQUEST)
+        
+class Profile(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
+
+    def get(self, request):
+        try:
+            user_profile = UserProfile.objects.get(user=request.user)
+            serializer = UserGetSerializer(user_profile)
+        except:
+            return Response({'message':'user doesnot has a profile'}, status=status.HTTP_200_OK)
+        
+        return Response({'message': 'Profile retrieved successfully', 'data':serializer.data}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        print(request.user, 'lggk')
+        serializer = ProfileSerializer(data=request.data)
+        if serializer.is_valid():
+            # user = CustomUser.objects.filter(email=request.user)
+            user_profile, created = UserProfile.objects.get_or_create(user=request.user, first_name = serializer.validated_data['first_name'], last_name = serializer.validated_data['last_name'], dob=serializer.validated_data['dob'], gender=serializer.validated_data['gender'], profile_pic = serializer.validated_data['profile_pic'])
+            if not created:
+                user_profile.first_name = serializer.validated_data['first_name']
+                user_profile.last_name = serializer.validated_data['last_name']
+                user_profile.dob = serializer.validated_data['dob']
+                user_profile.gender = serializer.validated_data['gender']
+                user_profile.profile_pic = serializer.validated_data['profile_pic']
+                user_profile.save()
+        else:
+            print(serializer.errors)
+            return Response(serializer.errors)
+
+        return Response({'message': 'Profile updated successfully', 'data':serializer.data}, status=status.HTTP_200_OK)
+
         
 
 class Home(APIView):

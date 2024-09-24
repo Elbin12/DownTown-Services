@@ -25,7 +25,8 @@ urlpatterns = [
    path('signin-with-google/',views.SignInWithGoogle.as_view()),
    path('verify_otp/', views.VerifyOTP.as_view()),
    path('logout/', views.LogoutView.as_view()),
-   path('home/', views.Home.as_view())
+   path('home/', views.Home.as_view()),
+   path('profile/', views.Profile.as_view())
 ]
 
 
