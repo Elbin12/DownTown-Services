@@ -17,6 +17,7 @@ class CustomUserManager(BaseUserManager):
         )
         if password:
             user.set_password(password)
+        user.save(using=self._db)
         return user
 
     def create_superuser(self, email, mob=None, password=None, **extra_fields):
@@ -55,7 +56,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 class UserProfile(models.Model):
     user = models.OneToOneField(CustomUser, on_delete = models.CASCADE, related_name = 'user_profile' )
     first_name = models.CharField(max_length=50)
-    last_name = models.CharField(max_length=50)
+    last_name = models.CharField(max_length=50, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
     profile_pic = models.ImageField(upload_to = 'user/profile_pic/', null=True, blank=True)

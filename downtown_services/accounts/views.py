@@ -27,9 +27,15 @@ def token_generation_and_set_in_cookie(user, additional_data=None):
     refresh["email"] = str(user.email)
     content = {
         'isActive': user.is_active,
+        'isAdmin' : user.is_superuser,
         'email':user.email,
     }
 
+    # profile = UserProfile.objects.filter(user=user).first()
+    # if profile:
+    #     data={}
+
+    print('from token')
     if additional_data:
         content.update(additional_data)
 
@@ -83,7 +89,7 @@ class SignIn(APIView):
             "OTP verification",
             message,
             settings.EMAIL_HOST_USER,
-            ['ajinth@yopmail.com'],
+            [email],
             fail_silently=False,
         )
         return Response({'message':f'OTP sent successfully to {email}.'}, status=status.HTTP_200_OK)
@@ -110,7 +116,12 @@ class VerifyOTP(APIView):
                 except:
                     user = CustomUser.objects.create_user(email=email, mob=mob)
                     user.save()
-                response = token_generation_and_set_in_cookie(user)
+                profile = UserProfile.objects.filter(user=user).first()
+                if profile:
+                    serializer = UserGetSerializer(profile)
+                    response = token_generation_and_set_in_cookie(user, serializer.data)
+                else:
+                    response = token_generation_and_set_in_cookie(user)
                 return response
             else:
                 return Response({'message':'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
@@ -170,7 +181,6 @@ class LogoutView(APIView):
 class Profile(APIView):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
-
     def get(self, request):
         try:
             user_profile = UserProfile.objects.get(user=request.user)
@@ -181,23 +191,29 @@ class Profile(APIView):
         return Response({'message': 'Profile retrieved successfully', 'data':serializer.data}, status=status.HTTP_200_OK)
 
     def post(self, request):
-        print(request.user, 'lggk')
-        serializer = ProfileSerializer(data=request.data)
-        if serializer.is_valid():
-            # user = CustomUser.objects.filter(email=request.user)
-            user_profile, created = UserProfile.objects.get_or_create(user=request.user, first_name = serializer.validated_data['first_name'], last_name = serializer.validated_data['last_name'], dob=serializer.validated_data['dob'], gender=serializer.validated_data['gender'], profile_pic = serializer.validated_data['profile_pic'])
-            if not created:
-                user_profile.first_name = serializer.validated_data['first_name']
-                user_profile.last_name = serializer.validated_data['last_name']
-                user_profile.dob = serializer.validated_data['dob']
-                user_profile.gender = serializer.validated_data['gender']
-                user_profile.profile_pic = serializer.validated_data['profile_pic']
-                user_profile.save()
-        else:
-            print(serializer.errors)
-            return Response(serializer.errors)
+        print(request.user, 'lggk', request.data)
+        print(request.FILES, 'kkk')
+        # serializer = ProfileSerializer(data=request.data)
+        # if serializer.is_valid():
+        #     # user = CustomUser.objects.filter(email=request.user)
+        user_profile, created = UserProfile.objects.get_or_create(user=request.user)
+        user_profile.first_name = request.data.get('first_name', user_profile.first_name)
+        user_profile.last_name = request.data.get('last_name', user_profile.last_name)
+        user_profile.dob = request.data.get('dob', user_profile.dob)
+        user_profile.gender = request.data.get('gender', user_profile.gender)
+        if 'profile_pic' in request.FILES:
+            print(request.FILES, 'llll')
+            user_profile.profile_pic = request.FILES['profile_pic']
+            print(user_profile.profile_pic)
 
-        return Response({'message': 'Profile updated successfully', 'data':serializer.data}, status=status.HTTP_200_OK)
+        user_profile.save()
+        # else:
+        #     print(serializer.errors)
+        #     return Response(serializer.errors)
+
+        serializer = UserGetSerializer(user_profile)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
         
 
