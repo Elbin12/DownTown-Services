@@ -29,6 +29,23 @@ class Login(APIView):
 class Users(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def get(self, request):
-        users = CustomUser.objects.filter(is_superuser=False)
+        users = CustomUser.objects.filter(is_superuser=False).order_by('date_joined')
         serailizer = GetUsers(users, many=True)
         return Response(serailizer.data, status=status.HTTP_200_OK)
+    
+
+class Block(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        email = request.data.get('email')
+        user = CustomUser.objects.filter(email=email).first()
+        print(user.is_active, 'active')
+        if user:
+            if user.is_active:
+                user.is_active = False
+            else:
+                user.is_active = True
+            user.save()
+        print(user.is_active, 'lll')
+        
+        return Response({'isActive':user.is_active}, status=status.HTTP_200_OK)

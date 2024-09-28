@@ -13,14 +13,6 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = ['first_name', 'last_name', 'dob', 'gender', 'profile_pic']
 
-    def validate(self, data):
-        if not data.first_name:
-            raise serializers.ValidationError("First Name is requierd.")
-        if not data.last_name:
-            raise serializers.ValidationError("First Name is requierd.")
-        
-        return data
-    
     
     
 class UserGetSerializer(serializers.ModelSerializer):

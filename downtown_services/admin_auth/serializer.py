@@ -10,7 +10,7 @@ class GetUsers(serializers.ModelSerializer):
     Name = serializers.SerializerMethodField()
     class Meta:
         model = CustomUser
-        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic']
+        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic', 'is_active']
     
     def get_Name(self, obj):
         user_profile = getattr(obj, 'user_profile', None)

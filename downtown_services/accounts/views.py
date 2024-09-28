@@ -193,25 +193,24 @@ class Profile(APIView):
     def post(self, request):
         print(request.user, 'lggk', request.data)
         print(request.FILES, 'kkk')
-        # serializer = ProfileSerializer(data=request.data)
-        # if serializer.is_valid():
-        #     # user = CustomUser.objects.filter(email=request.user)
-        user_profile, created = UserProfile.objects.get_or_create(user=request.user)
-        user_profile.first_name = request.data.get('first_name', user_profile.first_name)
-        user_profile.last_name = request.data.get('last_name', user_profile.last_name)
-        user_profile.dob = request.data.get('dob', user_profile.dob)
-        user_profile.gender = request.data.get('gender', user_profile.gender)
-        if 'profile_pic' in request.FILES:
-            print(request.FILES, 'llll')
-            user_profile.profile_pic = request.FILES['profile_pic']
-            print(user_profile.profile_pic)
+        serializer = ProfileSerializer(data=request.data)
+        if serializer.is_valid():    
+            user_profile, created = UserProfile.objects.get_or_create(user=request.user)
+            user_profile.first_name = request.data.get('first_name', user_profile.first_name)
+            user_profile.last_name = request.data.get('last_name', user_profile.last_name)
+            user_profile.dob = request.data.get('dob', user_profile.dob)
+            user_profile.gender = request.data.get('gender', user_profile.gender)
+            if 'profile_pic' in request.FILES:
+                print(request.FILES, 'llll')
+                user_profile.profile_pic = request.FILES['profile_pic']
+                print(user_profile.profile_pic)
 
-        user_profile.save()
-        # else:
-        #     print(serializer.errors)
-        #     return Response(serializer.errors)
+            user_profile.save()
 
-        serializer = UserGetSerializer(user_profile)
+            serializer = UserGetSerializer(user_profile)
+        
+        else:
+            return Response(serializer.errors, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
