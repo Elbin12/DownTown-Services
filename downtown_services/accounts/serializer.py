@@ -9,9 +9,16 @@ class CustomUserSerializer(serializers.ModelSerializer):
         fields = ['email', 'mob']  
 
 class ProfileSerializer(serializers.ModelSerializer):
+    mob = serializers.CharField(source='user.mob')
     class Meta:
         model = UserProfile
-        fields = ['first_name', 'last_name', 'dob', 'gender', 'profile_pic']
+        fields = ['first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'mob']
+    
+    def validate(self, data):
+        print(data, 'lkk')
+        if CustomUser.objects.filter(mob=data.get('user',{}).get('mob')).exists():
+            raise serializers.ValidationError({'mob':'User with this mobile number already exists.'})
+        return data
 
     
     

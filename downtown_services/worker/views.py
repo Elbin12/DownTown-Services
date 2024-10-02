@@ -6,4 +6,8 @@ from accounts.models import CustomUser
 
 # Create your views here.
 
+class Login(APIView):
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        print(request.data, 'data')
         

@@ -14,8 +14,39 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializer import ProfileSerializer, UserGetSerializer
 
+from .tasks import send_mail_task
+
 
 # Create your views here.
+
+
+def send_email(request, email, mob):
+    otp = generate_otp()
+    request.session['otp'] = otp
+    request.session['email'] = email
+    request.session['mob'] = mob
+    
+    message = (
+        f"""
+        Dear {request.data['email']},
+
+        Thank you for registering with DownTown Services!
+
+        To complete your account setup, please verify your email address by entering the One-Time Password (OTP) provided below:
+
+        Your OTP is: {otp}
+
+        Best regards,
+        The DownTown Services Team
+        """
+    )
+    send_mail_task.delay(
+        "OTP verification",
+        message,
+        settings.EMAIL_HOST_USER,
+        [email]
+    )
+    
 
 
 def generate_otp():
@@ -65,33 +96,7 @@ class SignIn(APIView):
         print(request.data, 'lll')
         if not email and not mob:
             return Response({'message': 'Email or Mobile number is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        otp = generate_otp()
-        request.session['otp'] = otp
-        request.session['email'] = email
-        request.session['mob'] = mob
-        
-        message = (
-            f"""
-            Dear {request.data['email']},
-
-            Thank you for registering with DownTown Services!
-
-            To complete your account setup, please verify your email address by entering the One-Time Password (OTP) provided below:
-
-            Your OTP is: {otp}
-
-            Best regards,
-            The DownTown Services Team
-            """
-        )
-        send_mail(
-            "OTP verification",
-            message,
-            settings.EMAIL_HOST_USER,
-            [email],
-            fail_silently=False,
-        )
+        send_email(request, email, mob)
         return Response({'message':f'OTP sent successfully to {email}.'}, status=status.HTTP_200_OK)
 
 
@@ -109,6 +114,7 @@ class VerifyOTP(APIView):
         if not email:
             email = None
         if session_otp is not None:
+            print(session_otp, otp)
             if str(session_otp) == otp:
                 del request.session['otp']
                 try:
@@ -200,12 +206,14 @@ class Profile(APIView):
             user_profile.last_name = request.data.get('last_name', user_profile.last_name)
             user_profile.dob = request.data.get('dob', user_profile.dob)
             user_profile.gender = request.data.get('gender', user_profile.gender)
+            request.user.mob = request.data.get('mob')
             if 'profile_pic' in request.FILES:
                 print(request.FILES, 'llll')
                 user_profile.profile_pic = request.FILES['profile_pic']
                 print(user_profile.profile_pic)
 
             user_profile.save()
+            request.user.save()
 
             serializer = UserGetSerializer(user_profile)
         
@@ -222,3 +230,4 @@ class Home(APIView):
     
     def post(self, request):
         return Response({'message': 'Data received'}, status=status.HTTP_200_OK)
+
