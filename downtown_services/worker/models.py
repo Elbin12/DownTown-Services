@@ -8,12 +8,17 @@ from accounts.models import CustomUserManager
 
     
 class CustomWorker(AbstractBaseUser, PermissionsMixin):
-    email = models.EmailField(unique=True, null=True, blank=True)
-    mob = models.CharField(max_length=10, unique=True, null=True, blank=True)
-    is_staff = models.BooleanField(default=False)
+    email = models.EmailField(unique=True)
+    mob = models.CharField(max_length=10, unique=True)
+    is_staff = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(default=timezone.now)
-
+    STATUS_CHOICES = [
+        ('in_review', 'In Review'),
+        ('rejected', 'Rejected'),
+        ('verified', 'Verified'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_review')
     groups = models.ManyToManyField(
         'auth.Group',
         related_name='customworker_groups', 
@@ -38,7 +43,7 @@ class WorkerProfile(models.Model):
     last_name = models.CharField(max_length=50, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
-    profile_pic = models.ImageField(upload_to = 'user/profile_pic/', null=True, blank=True)
+    profile_pic = models.ImageField(upload_to = 'worker/profile_pic/', null=True, blank=True)
 
     def __str__(self):
-        return str(self.user.email) 
+        return str(self.user.email)

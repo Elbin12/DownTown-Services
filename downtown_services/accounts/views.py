@@ -46,6 +46,7 @@ def send_email(request, email, mob):
         settings.EMAIL_HOST_USER,
         [email]
     )
+    print('otp', otp)
     
 
 
@@ -56,15 +57,12 @@ def generate_otp():
 def token_generation_and_set_in_cookie(user, additional_data=None):
     refresh = RefreshToken.for_user(user)
     refresh["email"] = str(user.email)
+    refresh['user_type'] = 'user'
     content = {
         'isActive': user.is_active,
         'isAdmin' : user.is_superuser,
         'email':user.email,
     }
-
-    # profile = UserProfile.objects.filter(user=user).first()
-    # if profile:
-    #     data={}
 
     print('from token')
     if additional_data:
@@ -82,7 +80,7 @@ def token_generation_and_set_in_cookie(user, additional_data=None):
         key = 'refresh_token',
         value = str(refresh),
         secure = settings.SIMPLE_JWT['AUTH_COOKIE_SECURE'],
-        httponly = settings.SIMPLE_JWT['AUTH_COOKIE_HTTP_ONLY'],
+        httponly = settings.SIMPLE_JWT['AUTH_COOKIE_HTTP_ONLY'],    
         samesite = settings.SIMPLE_JWT['AUTH_COOKIE_SAMESITE']
     )
     return response
@@ -122,6 +120,8 @@ class VerifyOTP(APIView):
                 except:
                     user = CustomUser.objects.create_user(email=email, mob=mob)
                     user.save()
+                if not user.is_active:
+                    return Response({'message':'You are Blocked by admin'}, status=status.HTTP_400_BAD_REQUEST)
                 profile = UserProfile.objects.filter(user=user).first()
                 if profile:
                     serializer = UserGetSerializer(profile)
@@ -137,7 +137,7 @@ class VerifyOTP(APIView):
 class SignInWithGoogle(APIView):
     permission_classes  = [permissions.AllowAny]
     def post(self, request):
-        print(request.data, 'ddd')
+        print(request.data, 'ddd',)
         email = request.data['email']
         try:
             user = CustomUser.objects.get(email=email)
@@ -160,6 +160,8 @@ class SignInWithGoogle(APIView):
                 'last_name': request.data.get('family_name', ''),
                 'profile_pic': request.data.get('picture', '')
             }
+        if not user.is_active:
+            return Response({'message':'You are Blocked by admin'}, status=status.HTTP_400_BAD_REQUEST)
         response = token_generation_and_set_in_cookie(user, additional_data)
         return response
 
@@ -199,7 +201,7 @@ class Profile(APIView):
     def post(self, request):
         print(request.user, 'lggk', request.data)
         print(request.FILES, 'kkk')
-        serializer = ProfileSerializer(data=request.data)
+        serializer = ProfileSerializer(data=request.data, context={'request':request})
         if serializer.is_valid():    
             user_profile, created = UserProfile.objects.get_or_create(user=request.user)
             user_profile.first_name = request.data.get('first_name', user_profile.first_name)
