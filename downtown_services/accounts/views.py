@@ -61,6 +61,7 @@ def token_generation_and_set_in_cookie(user, additional_data=None):
     content = {
         'isActive': user.is_active,
         'isAdmin' : user.is_superuser,
+        'isWorker': user.is_staff,
         'email':user.email,
     }
 

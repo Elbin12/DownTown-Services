@@ -33,15 +33,20 @@ class Login(APIView):
     def post(self, request):
         print('hi', request.data)
         worker = CustomWorker.objects.filter(email = request.data['email']).first()
+        print(worker, 'gkg')
+        if not worker:
+            return Response({'message': 'Invalid email'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not worker.check_password(request.data.get('password')):
+            return Response({'message': 'Invalid password'}, status=status.HTTP_400_BAD_REQUEST)
+        
         if worker.status=='rejected':
             return Response({'message': 'You are rejected by admin'}, status=status.HTTP_400_BAD_REQUEST)
         if worker.status == 'in_review':
             return Response({'message': 'Your request are in progress.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not worker:
-            return Response({'message': 'Invalid email'}, status=status.HTTP_400_BAD_REQUEST)
-        if not worker.check_password(request.data.get('password')):
-            print('kkgj')
-            return Response({'message': 'Invalid email or password'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        worker_profile = WorkerProfile.objects.filter(user=worker).first()
+
         refresh = RefreshToken()
         refresh['worker_id'] = str(worker.id)
         refresh['user_type'] = 'worker'
@@ -49,9 +54,14 @@ class Login(APIView):
         content = {
             'isActive': worker.is_active,
             'isAdmin' : worker.is_superuser,
+            'isWorker': worker.is_staff,
             'email':worker.email,
             'mob':worker.mob
         }
+
+        if worker_profile:
+            serializer = WorkerDetailSerializer(worker)
+            content.update(serializer.data)
 
         response = Response(content, status=status.HTTP_200_OK)
         response.set_cookie(
@@ -108,9 +118,25 @@ class Profile(APIView):
             worker_profile.save()
             request.user.save()
 
-            serializer = WorkerDetailSerializer(worker_profile)
+            serializer = WorkerDetailSerializer(request.user)
         
         else:
             return Response(serializer.errors, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+class Logout(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        try:
+            refresh_token = request.COOKIES.get("worker_refresh_token")
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            response = Response(status=status.HTTP_205_RESET_CONTENT)
+            response.delete_cookie('worker_refresh_token')
+            response.delete_cookie('worker_access_token')
+            response.delete_cookie('csrftoken')
+            return response
+        except Exception as e:
+            return Response(status=status.HTTP_400_BAD_REQUEST)

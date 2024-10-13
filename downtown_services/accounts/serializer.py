@@ -16,7 +16,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     
     def validate(self, data):
         request = self.context.get('request')
-        print(request, request.user, 'll')
+        print(request, request.user,data, 'll')
         if CustomUser.objects.filter(mob=data.get('user',{}).get('mob')).exclude(id=request.user.id).exists():
             raise serializers.ValidationError({'mob':'User with this mobile number already exists.'})
         return data

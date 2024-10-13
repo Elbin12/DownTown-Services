@@ -44,13 +44,15 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source='worker_profile.last_name',required=False, allow_null=True)
     dob = serializers.DateField(source='worker_profile.dob', required=False, allow_null=True)
     gender = serializers.CharField(source='worker_profile.gender', required=False, allow_null=True)
-    profile_pic = serializers.ImageField(source='worker_profile.profile_pic', allow_null=True)
+    profile_pic = serializers.ImageField(source='worker_profile.profile_pic', allow_null=True, required=False)
     email = serializers.EmailField(required=False)
+    mob = serializers.CharField()
+    isWorker = serializers.BooleanField(source='is_staff')
 
     class Meta:
         model = CustomWorker
         fields = [
-            'email', 'mob', 'status', 'is_active', 'is_staff', 'date_joined', 
+            'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
             'first_name', 'last_name', 'dob', 'gender', 'profile_pic'
         ]
 
