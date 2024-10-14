@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser
 from worker.models import CustomWorker
-from .serializer import GetUsers, GetWorkers
+from .models import Categories, Services, SubCategories
+from .serializer import GetUsers, GetWorkers, GetCategories
 from accounts.views import token_generation_and_set_in_cookie
 # Create your views here.
 
@@ -40,14 +41,13 @@ class Block(APIView):
     def post(self, request):
         email = request.data.get('email')
         user = CustomUser.objects.filter(email=email).first()
-        print(user.is_active, 'active')
         if user:
             if user.is_active:
                 user.is_active = False
             else:
                 user.is_active = True
             user.save()
-        print(user.is_active, 'lll')
+            print(user.is_active, 'lll')
         
         return Response({'isActive':user.is_active}, status=status.HTTP_200_OK)
 
@@ -76,8 +76,46 @@ class HandleRequest(APIView):
         if user:
             if status in dict(CustomWorker.STATUS_CHOICES):
                 user.status = status
+                if status == 'verified':
+                    user.is_active = True
+                elif status == 'rejected':
+                    user.is_active = False
                 user.save()
                 return Response({'message': 'Status updated successfully'}, status=200)
             else:
                 return Response({'error': 'Invalid status'}, status=400)
         return Response({'error': 'User not found'}, status=404)
+    
+class CategoryManage(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get_object(self, pk):
+        print(pk, 'kk')
+        try:
+            return Categories.objects.get(id=pk)
+        except Categories.DoesNotExist:
+            return Response(f'category not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request):
+        categories = Categories.objects.all()
+        serializer = GetCategories(categories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        print(request.data, 'data')
+        serializer = GetCategories(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        print(pk, 'll', request.data)
+        category = self.get_object(pk)  
+        serializer = GetCategories(category, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+

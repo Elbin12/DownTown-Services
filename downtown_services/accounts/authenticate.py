@@ -1,18 +1,17 @@
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.conf import settings
-
-from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomUser
 from worker.models import CustomWorker
 
 from rest_framework.authentication import CSRFCheck
-import jwt
-import requests
 from rest_framework.exceptions import APIException
 from rest_framework.test import APIRequestFactory
+
+from django.http import JsonResponse
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework import status
 
 
 class BlockedUserException(APIException):
@@ -102,6 +101,20 @@ class customAuthentication(JWTAuthentication):
         enforce_csrf(request)
         user = self.get_user(validated_token)
         if not user.is_active:
-            raise AuthenticationFailed({'message':'You are blocked by admin.'})
+            if request.path.startswith('/worker'):
+                access = 'worker_access_token'
+                refresh = 'worker_refresh_token'
+                refresh_token = request.COOKIES.get('worker_refresh_token')
+            else:
+                access = 'access_token'
+                refresh = 'refresh_token'
+                refresh_token = request.COOKIES.get("refresh_token")
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            response = JsonResponse({'message': 'You are blocked by admin.'}, status=401)
+            response.delete_cookie(refresh)
+            response.delete_cookie(access)
+            response.delete_cookie('csrftoken')
+            raise AuthenticationFailed({'message':'User is blocked by admin.'})
         request.user = user
         return self.get_user(validated_token), validated_token

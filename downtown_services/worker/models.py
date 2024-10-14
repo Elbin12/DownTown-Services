@@ -11,7 +11,7 @@ class CustomWorker(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     mob = models.CharField(max_length=10, unique=True)
     is_staff = models.BooleanField(default=True)
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
     STATUS_CHOICES = [
         ('in_review', 'In Review'),

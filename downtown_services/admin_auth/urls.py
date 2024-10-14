@@ -10,4 +10,6 @@ urlpatterns = [
    path('workers/', views.Workers.as_view()),
    path('requests/', views.Requests.as_view()),
    path('handle_requests/', views.HandleRequest.as_view()),
+   path('categories/', views.CategoryManage.as_view(), name='category-list'),
+   path('categories/<int:pk>/', views.CategoryManage.as_view(), name='category-edit'),
 ]
