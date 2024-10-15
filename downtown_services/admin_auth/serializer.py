@@ -42,8 +42,12 @@ class GetCategories(serializers.ModelSerializer):
 
     def validate(self, attrs):
         category_name = attrs.get('category_name')
-        if Categories.objects.filter(category_name=category_name).exists():
-            raise serializers.ValidationError("A category with this name already exists.")
+        if self.instance is None:
+            if Categories.objects.filter(category_name=category_name).exists():
+                raise serializers.ValidationError("A category with this name already exists.")
+        else:
+            if Categories.objects.filter(category_name=category_name).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError("A category with this name already exists.")
         return attrs
     
     def create(self, validated_data):
@@ -56,5 +60,41 @@ class GetCategories(serializers.ModelSerializer):
             raise serializers.ValidationError("Category name cannot be null.")
 
         instance.category_name = category_name
+        instance.save()
+        return instance
+    
+class SubcategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubCategories
+        fields = '__all__'
+
+    def validate(self, attrs):
+        subcategory_name = attrs.get('subcategory_name')
+        if self.instance is None:
+            if SubCategories.objects.filter(subcategory_name=subcategory_name).exists():
+                raise serializers.ValidationError('A sub-category with this name is already exist.')
+        else:
+            if SubCategories.objects.filter(subcategory_name=subcategory_name).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError('A sub-category with this name is already exist.')
+        return attrs
+    
+    def create(self, validated_data):
+        return SubCategories.objects.create(**validated_data)
+    
+    def update(self, instance, validated_data):
+        subcategory_name = validated_data.get('subcategory_name', instance.subcategory_name)
+
+        if not subcategory_name:
+            raise serializers.ValidationError('Sub-category name cannot be null')
+        
+        category_id = validated_data.get('category_id')
+        if category_id:
+            try:
+                category = Categories.objects.get(id=category_id)
+                instance.category = category
+            except Categories.DoesNotExist:
+                raise serializers.ValidationError('Category with this ID does not exist.')
+
+        instance.subcategory_name = subcategory_name
         instance.save()
         return instance

@@ -5,7 +5,7 @@ from rest_framework import permissions, status
 from accounts.models import CustomUser
 from worker.models import CustomWorker
 from .models import Categories, Services, SubCategories
-from .serializer import GetUsers, GetWorkers, GetCategories
+from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer
 from accounts.views import token_generation_and_set_in_cookie
 # Create your views here.
 
@@ -87,7 +87,7 @@ class HandleRequest(APIView):
         return Response({'error': 'User not found'}, status=404)
     
 class CategoryManage(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAdminUser]
 
     def get_object(self, pk):
         print(pk, 'kk')
@@ -119,3 +119,35 @@ class CategoryManage(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+class Subcategory(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_object(self, pk):
+        print(pk, 'kk')
+        try:
+            return SubCategories.objects.get(id=pk)
+        except SubCategories.DoesNotExist:
+            return Response(f'subcategory not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request):
+        sub_categories = SubCategories.objects.all()
+        print(sub_categories    )
+        serializer = SubcategorySerializer(sub_categories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        print(request.data)
+        serializer = SubcategorySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        print(request.data)
+        subcategory = self.get_object(pk)
+        serializer = SubcategorySerializer(subcategory, request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
