@@ -10,8 +10,25 @@ import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
 from .serializer import WorkerDetailSerializer
+from admin_auth.serializer import GetCategories
+from admin_auth.models import Categories
 
 # Create your views here.
+
+
+class CheckingCredentials(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        print(request.data)
+        email = request.data.get('email')
+        mob = request.data.get('mob')
+        if CustomWorker.objects.filter(email=email).exists():
+            return Response({'message':'An account is already registered with this email'}, status=status.HTTP_400_BAD_REQUEST)
+        if CustomWorker.objects.filter(mob=mob).exists():
+            return Response({'message':'An account is already registered with this mobile number'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = GetCategories(Categories.objects.all(), many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class SignUp(APIView):
     permission_classes = [permissions.AllowAny]

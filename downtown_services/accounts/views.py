@@ -12,7 +12,8 @@ from django.conf import settings
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializer import ProfileSerializer, UserGetSerializer
+from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories
+from admin_auth.models import Categories
 
 from .tasks import send_mail_task
 
@@ -234,3 +235,10 @@ class Home(APIView):
     def post(self, request):
         return Response({'message': 'Data received'}, status=status.HTTP_200_OK)
 
+class GetCategories(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        category = Categories.objects.all()
+        serializer = CategoriesAndSubCategories(category, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

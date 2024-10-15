@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from . models import CustomUser, UserProfile
+from admin_auth.models import Categories, Services, SubCategories
 
 
 
@@ -31,3 +32,15 @@ class UserGetSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = ['email', 'mob', 'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
+
+
+class SubcategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubCategories
+        fields = '__all__'
+
+class CategoriesAndSubCategories(serializers.ModelSerializer):
+    subcategories = SubcategorySerializer(many=True)
+    class Meta:
+        model = Categories
+        fields = [ 'category_name', 'subcategories' ]

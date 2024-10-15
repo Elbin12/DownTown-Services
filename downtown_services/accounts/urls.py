@@ -26,7 +26,8 @@ urlpatterns = [
    path('verify_otp/', views.VerifyOTP.as_view()),
    path('logout/', views.LogoutView.as_view()),
    path('home/', views.Home.as_view()),
-   path('profile/', views.Profile.as_view())
+   path('profile/', views.Profile.as_view()),
+   path('categories/', views.GetCategories.as_view())
 ]
 
 

@@ -5,7 +5,7 @@ from rest_framework import permissions, status
 from accounts.models import CustomUser
 from worker.models import CustomWorker
 from .models import Categories, Services, SubCategories
-from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer
+from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer, ServiceSerializer
 from accounts.views import token_generation_and_set_in_cookie
 # Create your views here.
 
@@ -81,7 +81,8 @@ class HandleRequest(APIView):
                 elif status == 'rejected':
                     user.is_active = False
                 user.save()
-                return Response({'message': 'Status updated successfully'}, status=200)
+                serializer = GetWorkers(user)
+                return Response(serializer.data, status=200)
             else:
                 return Response({'error': 'Invalid status'}, status=400)
         return Response({'error': 'User not found'}, status=404)
@@ -147,6 +148,38 @@ class Subcategory(APIView):
         print(request.data)
         subcategory = self.get_object(pk)
         serializer = SubcategorySerializer(subcategory, request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class ServicesManage(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_object(self, pk):
+        print(pk, 'kk')
+        try:
+            return Services.objects.get(id=pk)
+        except Services.DoesNotExist:
+            return Response(f'subcategory not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request):
+        services = Services.objects.all()
+        serializer = ServiceSerializer(services)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        serializer = ServiceSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        print(request.data)
+        subcategory = self.get_object(pk)
+        serializer = ServiceSerializer(subcategory, request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
