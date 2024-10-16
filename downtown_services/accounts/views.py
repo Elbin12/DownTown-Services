@@ -237,6 +237,7 @@ class Home(APIView):
 
 class GetCategories(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
     def get(self, request):
         category = Categories.objects.all()

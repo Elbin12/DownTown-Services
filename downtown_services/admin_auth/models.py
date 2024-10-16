@@ -23,3 +23,4 @@ class Services(models.Model):
     pic =  models.ImageField(upload_to = 'services/', null=True, blank=True)    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    price = models.IntegerField()

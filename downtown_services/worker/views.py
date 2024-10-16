@@ -13,6 +13,11 @@ from .serializer import WorkerDetailSerializer
 from admin_auth.serializer import GetCategories
 from admin_auth.models import Categories
 
+from admin_auth.models import Services
+from admin_auth.serializer import ServiceSerializer
+
+from rest_framework.parsers import MultiPartParser, FormParser
+
 # Create your views here.
 
 
@@ -157,3 +162,37 @@ class Logout(APIView):
             return response
         except Exception as e:
             return Response(status=status.HTTP_400_BAD_REQUEST)
+        
+
+class ServicesManage(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
+
+    def get_object(self, pk):
+        print(pk, 'kk')
+        try:
+            return Services.objects.get(id=pk)
+        except Services.DoesNotExist:
+            return Response(f'subcategory not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request):
+        services = Services.objects.all()
+        serializer = ServiceSerializer(services)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        print(request.data, 'data')
+        serializer = ServiceSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        print(request.data)
+        subcategory = self.get_object(pk)
+        serializer = ServiceSerializer(subcategory, request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

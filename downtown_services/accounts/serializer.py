@@ -43,4 +43,4 @@ class CategoriesAndSubCategories(serializers.ModelSerializer):
     subcategories = SubcategorySerializer(many=True)
     class Meta:
         model = Categories
-        fields = [ 'category_name', 'subcategories' ]
+        fields = [ 'category_name', 'id', 'subcategories' ]
