@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser
-from .models import CustomWorker, WorkerProfile
+from .models import CustomWorker, WorkerProfile, Services
 from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer
 
 import jwt, datetime
@@ -13,7 +13,6 @@ from .serializer import WorkerDetailSerializer
 from admin_auth.serializer import GetCategories
 from admin_auth.models import Categories
 
-from admin_auth.models import Services
 from admin_auth.serializer import ServiceSerializer
 
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -177,7 +176,7 @@ class ServicesManage(APIView):
 
     def get(self, request):
         services = Services.objects.all()
-        serializer = ServiceSerializer(services)
+        serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):

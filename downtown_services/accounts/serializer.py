@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from . models import CustomUser, UserProfile
-from admin_auth.models import Categories, Services, SubCategories
+from admin_auth.models import Categories, SubCategories
+from worker.models import Services
 
 
 

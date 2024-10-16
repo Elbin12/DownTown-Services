@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from accounts.models import CustomUser, UserProfile
 from worker.models import CustomWorker
-from .models import Categories, SubCategories, Services
+from .models import Categories, SubCategories
+from worker.models import Services
 
 
 class GetUsers(serializers.ModelSerializer):
@@ -106,7 +107,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
     def validate(self, attrs):
-        service_name = attrs.get('srevice_name')
+        service_name = attrs.get('service_name')
         if Services.objects.filter(service_name=service_name).exists():
             raise serializers.ValidationError('A service with this name is already exists')
         return attrs

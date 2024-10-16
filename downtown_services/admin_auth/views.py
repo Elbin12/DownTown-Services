@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser
 from worker.models import CustomWorker
-from .models import Categories, Services, SubCategories
+from .models import Categories, SubCategories
 from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer, ServiceSerializer
 from accounts.views import token_generation_and_set_in_cookie
 # Create your views here.
