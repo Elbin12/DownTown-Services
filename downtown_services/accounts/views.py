@@ -14,6 +14,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories
 from admin_auth.models import Categories
+from worker.serializer import ServiceSerializer
+from worker.models import Services
 
 from .tasks import send_mail_task
 
@@ -242,4 +244,13 @@ class GetCategories(APIView):
     def get(self, request):
         category = Categories.objects.all()
         serializer = CategoriesAndSubCategories(category, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class ServicesView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        services = Services.objects.all()
+        serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

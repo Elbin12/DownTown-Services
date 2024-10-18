@@ -1,6 +1,8 @@
 from rest_framework import serializers
-from .models import WorkerProfile, CustomWorker
+from .models import WorkerProfile, CustomWorker, Services
 from django.contrib.auth.hashers import make_password   
+from accounts.serializer import CategoriesAndSubCategories
+from admin_auth.models import Categories
 
 
 
@@ -63,3 +65,29 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'mob':'worker with this mobile number already exists.'})
         return data
 
+class ServiceSerializer(serializers.ModelSerializer):
+    workerProfile = WorkerDetailSerializer(source='worker')
+    category_name = serializers.CharField(source='category.category_name', read_only=True)
+    subcategory_name = serializers.CharField(source='subcategory.subcategory_name', read_only=True) 
+    class Meta:
+        model = Services
+        fields = ['workerProfile', 'worker', 'service_name', 'description', 'category_name', 'subcategory_name', 'pic', 'price' ]
+        read_only_fields = ['worker']
+    
+    # def validate(self, attrs):
+    #     service_name = attrs.get('service_name')
+    #     if Services.objects.filter(service_name=service_name).exists():
+    #         raise serializers.ValidationError('A service with this name is already exists')
+    #     return attrs
+    
+    def create(self, validated_data):
+        worker = self.context.get('request').user
+        validated_data['worker'] = worker
+        return Services.objects.create(**validated_data)
+    
+    def update(self, instance, validated_data):
+        for attr in ['service_name', 'description', 'category', 'subcategory', 'pic']:
+            value = validated_data.get(attr, getattr(instance, attr))
+            setattr(instance, attr, value)
+        instance.save()
+        return instance

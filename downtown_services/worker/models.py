@@ -51,6 +51,7 @@ class WorkerProfile(models.Model):
     
 
 class Services(models.Model):
+    worker = models.ForeignKey(CustomWorker, on_delete=models.CASCADE, related_name='services')
     service_name = models.CharField()
     description = models.TextField()
     category = models.ForeignKey(Categories, on_delete=models.CASCADE, related_name='services')
@@ -59,3 +60,4 @@ class Services(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     price = models.IntegerField()
+    # is_approved = models.BooleanField(default=False)

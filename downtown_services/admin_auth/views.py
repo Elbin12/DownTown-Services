@@ -5,8 +5,10 @@ from rest_framework import permissions, status
 from accounts.models import CustomUser
 from worker.models import CustomWorker
 from .models import Categories, SubCategories
-from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer, ServiceSerializer
+from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer
 from accounts.views import token_generation_and_set_in_cookie
+from worker.models import Services
+from worker.serializer import ServiceSerializer
 # Create your views here.
 
 
@@ -153,3 +155,10 @@ class Subcategory(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+class GetServices(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        services = Services.objects.all()
+        serializer = ServiceSerializer(services, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

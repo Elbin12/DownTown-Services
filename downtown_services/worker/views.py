@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser
 from .models import CustomWorker, WorkerProfile, Services
-from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer
+from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer
 
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -12,8 +12,6 @@ from django.conf import settings
 from .serializer import WorkerDetailSerializer
 from admin_auth.serializer import GetCategories
 from admin_auth.models import Categories
-
-from admin_auth.serializer import ServiceSerializer
 
 from rest_framework.parsers import MultiPartParser, FormParser
 
@@ -175,13 +173,12 @@ class ServicesManage(APIView):
             return Response(f'subcategory not found on {pk}', status=status.HTTP_404_NOT_FOUND)
 
     def get(self, request):
-        services = Services.objects.all()
+        services = Services.objects.filter(worker=request.user)
         serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):
-        print(request.data, 'data')
-        serializer = ServiceSerializer(data=request.data)
+        serializer = ServiceSerializer(data=request.data,  context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)

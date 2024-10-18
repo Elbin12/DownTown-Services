@@ -101,24 +101,5 @@ class SubcategorySerializer(serializers.ModelSerializer):
         return instance
     
 
-class ServiceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Services
-        fields = '__all__'
-    
-    def validate(self, attrs):
-        service_name = attrs.get('service_name')
-        if Services.objects.filter(service_name=service_name).exists():
-            raise serializers.ValidationError('A service with this name is already exists')
-        return attrs
-    
-    def create(self, validated_data):
-        return Services.objects.create(**validated_data)
-    
-    def update(self, instance, validated_data):
-        for attr in ['service_name', 'description', 'category', 'subcategory', 'pic']:
-            value = validated_data.get(attr, getattr(instance, attr))
-            setattr(instance, attr, value)
-        instance.save()
-        return instance
+
         
