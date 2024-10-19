@@ -66,12 +66,12 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
         return data
 
 class ServiceSerializer(serializers.ModelSerializer):
-    workerProfile = WorkerDetailSerializer(source='worker')
+    workerProfile = WorkerDetailSerializer(source='worker', read_only=True)
     category_name = serializers.CharField(source='category.category_name', read_only=True)
     subcategory_name = serializers.CharField(source='subcategory.subcategory_name', read_only=True) 
     class Meta:
         model = Services
-        fields = ['workerProfile', 'worker', 'service_name', 'description', 'category_name', 'subcategory_name', 'pic', 'price' ]
+        fields = ['workerProfile', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price' ]
         read_only_fields = ['worker']
     
     # def validate(self, attrs):

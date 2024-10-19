@@ -34,12 +34,18 @@ class GetWorkers(serializers.ModelSerializer):
         if worker_profile:
             return f"{worker_profile.first_name} {worker_profile.last_name}"
         return ""
+
+class GetSubcategories(serializers.ModelSerializer):
+    class Meta:
+        model = SubCategories
+        fields = '__all__'
     
 
 class GetCategories(serializers.ModelSerializer):
+    subcategories = GetSubcategories(many=True, read_only=True)
     class Meta:
         model = Categories
-        fields = '__all__'
+        fields = ['id', 'category_name', 'subcategories']
 
     def validate(self, attrs):
         category_name = attrs.get('category_name')
