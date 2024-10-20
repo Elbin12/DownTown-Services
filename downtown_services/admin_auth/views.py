@@ -93,7 +93,6 @@ class CategoryManage(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get_object(self, pk):
-        print(pk, 'kk')
         try:
             return Categories.objects.get(id=pk)
         except Categories.DoesNotExist:
@@ -118,9 +117,15 @@ class CategoryManage(APIView):
         serializer = GetCategories(category, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        
+            return Response(serializer.data, status=status.HTTP_200_OK) 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        print(request.data, 'ooo')
+        category = self.get_object(pk)
+        category.delete()
+        return Response(status=status.HTTP_200_OK)
+
 
 class Subcategory(APIView):
     permission_classes = [permissions.IsAdminUser]
@@ -154,6 +159,12 @@ class Subcategory(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        print(request.data, 'ooo')
+        subcategory = self.get_object(pk)
+        subcategory.delete()
+        return Response(status=status.HTTP_200_OK)
     
 class GetServices(APIView):
     permission_classes = [permissions.IsAdminUser]
