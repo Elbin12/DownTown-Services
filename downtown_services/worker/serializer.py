@@ -71,14 +71,18 @@ class ServiceSerializer(serializers.ModelSerializer):
     subcategory_name = serializers.CharField(source='subcategory.subcategory_name', read_only=True) 
     class Meta:
         model = Services
-        fields = ['workerProfile', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price' ]
+        fields = ['workerProfile','id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price' ]
         read_only_fields = ['worker']
     
     def validate(self, attrs):
         service_name = attrs.get('service_name')
         worker = self.context['request'].user
-        if Services.objects.filter(service_name=service_name, worker=worker).exists():
-            raise serializers.ValidationError('A service with this name is already exists')
+        if self.instance is None:
+            if Services.objects.filter(service_name=service_name, worker=worker).exists():
+                raise serializers.ValidationError('A service with this name already exists')    
+        else:
+            if Services.objects.filter(service_name=service_name, worker=worker).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError('A service with this name already exists')
         return attrs
     
     def create(self, validated_data):
@@ -87,7 +91,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         return Services.objects.create(**validated_data)
     
     def update(self, instance, validated_data):
-        for attr in ['service_name', 'description', 'category', 'subcategory', 'pic']:
+        for attr in ['service_name', 'description', 'category', 'subcategory', 'pic', 'price']:
             value = validated_data.get(attr, getattr(instance, attr))
             setattr(instance, attr, value)
         instance.save()

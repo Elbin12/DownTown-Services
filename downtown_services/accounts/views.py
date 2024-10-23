@@ -18,6 +18,7 @@ from worker.serializer import ServiceSerializer
 from worker.models import Services
 
 from .tasks import send_mail_task
+from django.db.models import Q
 
 
 # Create your views here.
@@ -251,6 +252,11 @@ class ServicesView(APIView):
     authentication_classes = []
 
     def get(self, request):
+        search_key = request.query_params.get('search_key', None)
+        print(search_key, 'kk')
         services = Services.objects.all()
+        if search_key:
+            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__icontains=search_key))
+        print(services, 'll')
         serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

@@ -51,6 +51,8 @@ class Login(APIView):
     permission_classes = [permissions.AllowAny]
     def post(self, request):
         print('hi', request.data)
+        if not request.data.get('email'):
+            return Response({'message': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST) 
         worker = CustomWorker.objects.filter(email = request.data['email']).first()
         print(worker, 'gkg')
         if not worker:
@@ -187,7 +189,7 @@ class ServicesManage(APIView):
     def put(self, request, pk):
         print(request.data)
         subcategory = self.get_object(pk)
-        serializer = ServiceSerializer(subcategory, request.data, partial=True)
+        serializer = ServiceSerializer(subcategory, request.data, context={'request': request}, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
