@@ -56,7 +56,7 @@ class Services(models.Model):
     description = models.TextField()
     category = models.ForeignKey(Categories, on_delete=models.CASCADE, related_name='services')
     subcategory = models.ForeignKey(SubCategories, on_delete=models.CASCADE, related_name='services')
-    pic =  models.ImageField(upload_to = 'services/', null=True, blank=True)    
+    pic =  models.FileField(upload_to = 'services/', null=True, blank=True)    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     price = models.IntegerField()

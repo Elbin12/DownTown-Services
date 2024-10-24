@@ -15,6 +15,10 @@ from admin_auth.models import Categories
 
 from rest_framework.parsers import MultiPartParser, FormParser
 
+from accounts.utils import upload_fileobj_to_s3
+import time
+import os
+from datetime import datetime
 # Create your views here.
 
 
@@ -133,7 +137,21 @@ class Profile(APIView):
             request.user.mob = request.data.get('mob')
             if 'profile_pic' in request.FILES:
                 print(request.FILES, 'llll')
-                worker_profile.profile_pic = request.FILES['profile_pic']
+                file = request.FILES['profile_pic']
+                file_extension = os.path.splitext(file.name)[1]
+                current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                unique_filename = f"{current_time_str}{file_extension}"
+                s3_file_path = f"workers/profile_pic/{unique_filename}"
+                try:
+                    image_url = upload_fileobj_to_s3(file, s3_file_path)
+                    if image_url:
+                        worker_profile.profile_pic = s3_file_path
+                        print("Image URL:", image_url)
+                    else:
+                        return Response({'error': 'File upload failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as e:
+                    print(e)
+                    return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 print(worker_profile.profile_pic)
 
             worker_profile.save()
@@ -180,6 +198,7 @@ class ServicesManage(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):
+        print(request.data, 'data')
         serializer = ServiceSerializer(data=request.data,  context={'request': request})
         if serializer.is_valid():
             serializer.save()

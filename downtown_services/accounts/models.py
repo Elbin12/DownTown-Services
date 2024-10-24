@@ -59,7 +59,7 @@ class UserProfile(models.Model):
     last_name = models.CharField(max_length=50, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
-    profile_pic = models.ImageField(upload_to = 'user/profile_pic/', null=True, blank=True)
+    profile_pic = models.FileField(upload_to = 'users/profile_pic/', null=True, blank=True)
 
     def __str__(self):
         return str(self.user.email)

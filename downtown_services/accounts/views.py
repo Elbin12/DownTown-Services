@@ -19,7 +19,10 @@ from worker.models import Services
 
 from .tasks import send_mail_task
 from django.db.models import Q
+from .utils import upload_fileobj_to_s3, create_presigned_url
 
+import os
+from datetime import datetime
 
 # Create your views here.
 
@@ -200,7 +203,6 @@ class Profile(APIView):
             serializer = UserGetSerializer(user_profile)
         except:
             return Response({'message':'user doesnot has a profile'}, status=status.HTTP_200_OK)
-        
         return Response({'message': 'Profile retrieved successfully', 'data':serializer.data}, status=status.HTTP_200_OK)
 
     def post(self, request):
@@ -216,7 +218,21 @@ class Profile(APIView):
             request.user.mob = request.data.get('mob')
             if 'profile_pic' in request.FILES:
                 print(request.FILES, 'llll')
-                user_profile.profile_pic = request.FILES['profile_pic']
+                file = request.FILES['profile_pic']
+                file_extension = os.path.splitext(file.name)[1]
+                current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                unique_filename = f"{current_time_str}{file_extension}"
+                s3_file_path = f"users/profile_pic/{unique_filename}"
+                try:
+                    image_url = upload_fileobj_to_s3(file, s3_file_path)
+                    if image_url:
+                        user_profile.profile_pic = s3_file_path
+                        print("Image URL:", image_url)
+                    else:
+                        return Response({'error': 'File upload failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as e:
+                    print(e)
+                    return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 print(user_profile.profile_pic)
 
             user_profile.save()
@@ -256,7 +272,7 @@ class ServicesView(APIView):
         print(search_key, 'kk')
         services = Services.objects.all()
         if search_key:
-            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__icontains=search_key))
+            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key))
         print(services, 'll')
         serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
