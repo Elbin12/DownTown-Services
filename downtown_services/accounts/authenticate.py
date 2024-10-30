@@ -12,6 +12,7 @@ from rest_framework.test import APIRequestFactory
 from django.http import JsonResponse
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
+import json
 
 
 class BlockedUserException(APIException):
@@ -76,8 +77,10 @@ class customAuthentication(JWTAuthentication):
             return None
 
         try:
+            print(raw_token, 'raw')
             validated_token = self.get_validated_token(raw_token)
         except Exception as e:
+            print('hi')
             if request.path.startswith('/worker'):
                 refresh_token = request.COOKIES.get('worker_refresh_token')
             else:
@@ -86,7 +89,7 @@ class customAuthentication(JWTAuthentication):
                     raise AuthenticationFailed('Authentication credentials were not provided.')
             try:
                 factory = APIRequestFactory()
-                token_refresh_request = factory.post('/api/token/refresh/', {'refresh': refresh_token})
+                token_refresh_request = factory.post('/api/token/refresh/', data=json.dumps({'refresh': refresh_token}), content_type='application/json')
 
                 token_refresh_view = TokenRefreshView.as_view()
                 response = token_refresh_view(token_refresh_request)

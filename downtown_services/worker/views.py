@@ -68,7 +68,7 @@ class Login(APIView):
         if worker.status=='rejected':
             return Response({'message': 'You are rejected by admin'}, status=status.HTTP_400_BAD_REQUEST)
         if worker.status == 'in_review':
-            return Response({'message': 'Your request are in progress.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'message': 'Your account are under verification.'}, status=status.HTTP_400_BAD_REQUEST)
         
         worker_profile = WorkerProfile.objects.filter(user=worker).first()
 
@@ -207,9 +207,14 @@ class ServicesManage(APIView):
     
     def put(self, request, pk):
         print(request.data)
-        subcategory = self.get_object(pk)
-        serializer = ServiceSerializer(subcategory, request.data, context={'request': request}, partial=True)
+        service = self.get_object(pk)
+        serializer = ServiceSerializer(service, request.data, context={'request': request}, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        service = self.get_object(pk)
+        service.delete()
+        return Response(status=status.HTTP_200_OK)

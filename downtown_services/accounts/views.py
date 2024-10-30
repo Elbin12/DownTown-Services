@@ -13,7 +13,7 @@ import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories
-from admin_auth.models import Categories
+from admin_auth.models import Categories, SubCategories
 from worker.serializer import ServiceSerializer
 from worker.models import Services
 
@@ -23,6 +23,7 @@ from .utils import upload_fileobj_to_s3, create_presigned_url
 
 import os
 from datetime import datetime
+from django.db.models import Count
 
 # Create your views here.
 
@@ -259,7 +260,7 @@ class GetCategories(APIView):
     authentication_classes = []
 
     def get(self, request):
-        category = Categories.objects.all()
+        category = Categories.objects.annotate(sub_category_count=Count('subcategories')).filter(sub_category_count__gt=0)
         serializer = CategoriesAndSubCategories(category, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -268,11 +269,44 @@ class ServicesView(APIView):
     authentication_classes = []
 
     def get(self, request):
+        print(request.query_params.get('selected_sub', None),request.query_params, 'request params')
+        category_id = request.query_params.get('category_id', None)
         search_key = request.query_params.get('search_key', None)
-        print(search_key, 'kk')
         services = Services.objects.all()
+        if category_id:
+            category = Categories.objects.filter(id=category_id).first()
+            services = Services.objects.filter(category=category)
         if search_key:
             services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key))
-        print(services, 'll')
         serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        search_key = request.data.get('search_key')
+        if search_key:
+            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key))
+        else:
+            services = Services.objects.all()
+        selected = request.data.get('selected_sub')
+        print(selected, 'selected')
+        services_q = Q()
+        for key, items in selected.items():
+            print(items, 'item')
+            cat = Categories.objects.filter(id=key).first()
+            if cat:
+                services_q |= Q(category=cat, subcategory__in=items)
+        services = services.filter(services_q).distinct()
+        print(services, services_q)
+        serializer = ServiceSerializer(services, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class ServiceDetail(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, pk):
+        try:
+            service = Services.objects.get(id=pk)
+            serializer = ServiceSerializer(service)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Services.DoesNotExist:
+            return Response({'message':'Service does not exist'}, status=status.HTTP_404_NOT_FOUND)

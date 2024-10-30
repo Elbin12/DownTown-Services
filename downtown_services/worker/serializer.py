@@ -69,9 +69,7 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     
     def get_profile_pic(self, obj):
         image_url = create_presigned_url(str(obj.worker_profile.profile_pic))
-        print(image_url, 'kk')
         if image_url:
-            print(image_url, 'll')
             return image_url
         return None
 
