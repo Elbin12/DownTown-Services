@@ -33,9 +33,20 @@ class Login(APIView):
 class Users(APIView):
     permission_classes = [permissions.IsAdminUser]
     def get(self, request):
-        users = CustomUser.objects.filter(is_superuser=False).order_by('date_joined')
-        serailizer = GetUsers(users, many=True)
-        return Response(serailizer.data, status=status.HTTP_200_OK)
+        page_no = int(request.query_params.get('page_no', 1))
+        page_size = 5
+        offset = (page_no - 1) * page_size
+
+        current_users = CustomUser.objects.filter(is_superuser=False).order_by('date_joined')[offset:offset + page_size]
+        total_users = CustomUser.objects.filter(is_superuser=False).count()
+        total_pages = (total_users + page_size - 1) // page_size
+
+        pagination = {
+            'total_pages':total_pages,
+            'current_page':page_no
+        }
+        serializer = GetUsers(current_users, many=True)
+        return Response({'users': serializer.data, 'pagination': pagination}, status=status.HTTP_200_OK)
     
 
 class Block(APIView):
@@ -71,9 +82,20 @@ class WorkerBlock(APIView):
 class Workers(APIView):
     permission_classes = [permissions.IsAdminUser]
     def get(self, request):
-        workers = CustomWorker.objects.all().order_by('date_joined')
-        serailizer = GetWorkers(workers, many=True)
-        return Response(serailizer.data, status=status.HTTP_200_OK)
+        page_no = int(request.query_params.get('page_no', 1))
+        page_size = 5
+        offset = (page_no - 1) * page_size
+
+        workers = CustomWorker.objects.all().order_by('date_joined')[offset:offset + page_size]
+        total_users = CustomWorker.objects.all().count()
+        total_pages = (total_users + page_size - 1) // page_size
+
+        pagination = {
+            'total_pages':total_pages,
+            'current_page':page_no
+        }
+        serializer = GetWorkers(workers, many=True)
+        return Response({'workers': serializer.data, 'pagination': pagination}, status=status.HTTP_200_OK)
     
 
 class Requests(APIView):
