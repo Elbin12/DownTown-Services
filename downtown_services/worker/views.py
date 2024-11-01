@@ -69,6 +69,8 @@ class Login(APIView):
             return Response({'message': 'You are rejected by admin'}, status=status.HTTP_400_BAD_REQUEST)
         if worker.status == 'in_review':
             return Response({'message': 'Your account are under verification.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not worker.is_active:
+            return Response({'message': 'You are blocked'}, status=status.HTTP_400_BAD_REQUEST)
         
         worker_profile = WorkerProfile.objects.filter(user=worker).first()
 

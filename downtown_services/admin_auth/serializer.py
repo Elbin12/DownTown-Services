@@ -38,12 +38,12 @@ class GetWorkers(serializers.ModelSerializer):
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = CustomWorker
-        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic', 'is_active', 'status']
+        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic', 'is_active', 'status', 'id']
     
     def get_Name(self, obj):
         worker_profile = getattr(obj, 'worker_profile', None)
         if worker_profile:
-            return f"{worker_profile.first_name} {worker_profile.last_name}"
+            return f"{worker_profile.first_name} {worker_profile.last_name if worker_profile.last_name else ''}"
         return ""
     
     def get_profile_pic(self, instance):

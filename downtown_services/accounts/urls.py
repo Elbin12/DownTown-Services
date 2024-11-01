@@ -23,13 +23,14 @@ from django.conf.urls.static import static
 urlpatterns = [
    path('signin/', views.SignIn.as_view()),
    path('signin-with-google/',views.SignInWithGoogle.as_view()),
+   path('sent-otp/', views.SentOTP.as_view()),
    path('verify_otp/', views.VerifyOTP.as_view()),
+   path('verify/', views.Verify.as_view()),
    path('logout/', views.LogoutView.as_view()),
-   path('home/', views.Home.as_view()),
    path('profile/', views.Profile.as_view()),
    path('categories/', views.GetCategories.as_view()),
    path('services/', views.ServicesView.as_view()),
-   path('service/<int:pk>/', views.ServiceDetail.as_view())
+   path('service/<int:pk>/', views.ServiceDetail.as_view()),
 ]
 
 

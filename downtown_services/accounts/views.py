@@ -24,11 +24,12 @@ from .utils import upload_fileobj_to_s3, create_presigned_url
 import os
 from datetime import datetime
 from django.db.models import Count
+import requests
 
 # Create your views here.
 
 
-def send_email(request, email, mob):
+def send_email(request, email, mob=None):
     otp = generate_otp()
     request.session['otp'] = otp
     request.session['email'] = email
@@ -105,6 +106,17 @@ class SignIn(APIView):
             return Response({'message': 'Email or Mobile number is required'}, status=status.HTTP_400_BAD_REQUEST)
         send_email(request, email, mob)
         return Response({'message':f'OTP sent successfully to {email}.'}, status=status.HTTP_200_OK)
+    
+class SentOTP(APIView):
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        print(request.data, 'data', request.user)
+        email = request.data['email']
+        if request.user.is_authenticated:
+            if CustomUser.objects.exclude(email=request.user.email).filter(email=email).exists():
+                return Response({'message':'Email with this email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+        send_email(request, email)
+        return Response({'message':f'OTP sent successfully to {email}.'}, status=status.HTTP_200_OK)
 
 
 class VerifyOTP(APIView):
@@ -147,7 +159,19 @@ class SignInWithGoogle(APIView):
     permission_classes  = [permissions.AllowAny]
     def post(self, request):
         print(request.data, 'ddd',)
-        email = request.data['email']
+        token = request.data.get('token')
+        if not token:
+            return Response({'message': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        google_api_url = 'https://www.googleapis.com/oauth2/v3/userinfo'
+        headers = {'Authorization': f'Bearer {token}'}
+        google_response = requests.get(google_api_url, headers=headers)
+        
+        if google_response.status_code != 200:
+            return Response({'message': 'Invalid Google token'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user_data = google_response.json()
+        email = user_data['email']
         try:
             user = CustomUser.objects.get(email=email)
             user_profile = UserProfile.objects.get(user=user)
@@ -159,15 +183,15 @@ class SignInWithGoogle(APIView):
             user.save()
             profile = UserProfile.objects.create(
                     user=user, 
-                    first_name=request.data['given_name'], 
-                    last_name=request.data['family_name'],
-                    profile_pic=request.data['picture'],
+                    first_name=user_data['given_name'], 
+                    last_name=user_data['family_name'],
+                    profile_pic=user_data['picture'],
                 )
             profile.save()
             additional_data = {
-                'first_name': request.data.get('given_name', ''),
-                'last_name': request.data.get('family_name', ''),
-                'profile_pic': request.data.get('picture', '')
+                'first_name': user_data.get('given_name', ''),
+                'last_name': user_data.get('family_name', ''),
+                'profile_pic': user_data.get('picture', '')
             }
         if not user.is_active:
             return Response({'message':'You are Blocked by admin'}, status=status.HTTP_400_BAD_REQUEST)
@@ -194,6 +218,28 @@ class LogoutView(APIView):
             return response
         except Exception as e:
             return Response(status=status.HTTP_400_BAD_REQUEST)
+        
+class Verify(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        otp = request.data['otp']
+        session_otp = request.session.get('otp')
+        email = request.session.get('email')
+        print(email, 'mob')
+        if session_otp is not None:
+            print(session_otp, otp)
+            if str(session_otp) == otp:
+                del request.session['otp']
+                request.user.email = email
+                request.user.save()
+                user_profile = UserProfile.objects.get(user=request.user)
+                serializer = UserGetSerializer(user_profile)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response({'message':'Incorrect OTP'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'message': 'OTP not found or expired'}, status=status.HTTP_400_BAD_REQUEST)
+
         
 class Profile(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -246,14 +292,6 @@ class Profile(APIView):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-        
-
-class Home(APIView):
-    def get(self, request):
-        return Response({'message': 'Data received'}, status=status.HTTP_200_OK)
-    
-    def post(self, request):
-        return Response({'message': 'Data received'}, status=status.HTTP_200_OK)
 
 class GetCategories(APIView):
     permission_classes = [permissions.AllowAny]
@@ -269,36 +307,38 @@ class ServicesView(APIView):
     authentication_classes = []
 
     def get(self, request):
-        print(request.query_params.get('selected_sub', None),request.query_params, 'request params')
-        category_id = request.query_params.get('category_id', None)
-        search_key = request.query_params.get('search_key', None)
-        services = Services.objects.all()
-        if category_id:
-            category = Categories.objects.filter(id=category_id).first()
-            services = Services.objects.filter(category=category)
-        if search_key:
-            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key))
-        serializer = ServiceSerializer(services, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            search_key = request.query_params.get('search_key', None)
+            services = Services.objects.all()
+            filters = Q()
+            if search_key:
+                filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
+
+            services = Services.objects.filter(filters) if filters else Services.objects.all()
+            
+            serializer = ServiceSerializer(services, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": "An error occurred while retrieving services."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def post(self, request):
         search_key = request.data.get('search_key')
-        if search_key:
-            services = Services.objects.filter(Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key))
-        else:
-            services = Services.objects.all()
-        selected = request.data.get('selected_sub')
-        print(selected, 'selected')
-        services_q = Q()
-        for key, items in selected.items():
-            print(items, 'item')
-            cat = Categories.objects.filter(id=key).first()
-            if cat:
-                services_q |= Q(category=cat, subcategory__in=items)
-        services = services.filter(services_q).distinct()
-        print(services, services_q)
-        serializer = ServiceSerializer(services, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            filters = Q()
+            if search_key:
+                filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
+            services = Services.objects.filter(filters) if filters else Services.objects.all()
+            selected = request.data.get('selected_sub')
+            services_q = Q()
+            for key, items in selected.items():
+                cat = Categories.objects.filter(id=key).first()
+                if cat:
+                    services_q |= Q(category=cat, subcategory__in=items)
+            services = services.filter(services_q).distinct()
+            serializer = ServiceSerializer(services, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": "An error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class ServiceDetail(APIView):
     permission_classes = [permissions.AllowAny]
@@ -310,3 +350,5 @@ class ServiceDetail(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Services.DoesNotExist:
             return Response({'message':'Service does not exist'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"detail": "An error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

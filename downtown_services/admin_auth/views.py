@@ -52,6 +52,20 @@ class Block(APIView):
             print(user.is_active, 'lll')
         
         return Response({'isActive':user.is_active}, status=status.HTTP_200_OK)
+    
+class WorkerBlock(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        email = request.data.get('email')
+        worker = CustomWorker.objects.filter(email=email).first()
+        if worker:
+            if worker.is_active:
+                worker.is_active = False
+            else:
+                worker.is_active = True
+            worker.save()
+            print(worker.is_active, 'lll')
+        return Response({'isActive':worker.is_active}, status=status.HTTP_200_OK)
 
 
 class Workers(APIView):
@@ -83,8 +97,10 @@ class HandleRequest(APIView):
                 elif status == 'rejected':
                     user.is_active = False
                 user.save()
-                serializer = GetWorkers(user)
-                return Response(serializer.data, status=200)
+                serailizer = GetWorkers(user)
+                if user.is_active:
+                    return Response( {**serailizer.data, 'success':'Request accepted'}, status=200)
+                return Response( {**serailizer.data, 'failure':'Request rejected'}, status=200)
             else:
                 return Response({'error': 'Invalid status'}, status=400)
         return Response({'error': 'User not found'}, status=404)
