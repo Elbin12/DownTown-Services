@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
-from accounts.models import CustomUserManager
+from accounts.models import CustomUserManager, CustomUser
 from admin_auth.models import Categories, SubCategories
 
 # Create your models here.
@@ -45,6 +45,12 @@ class WorkerProfile(models.Model):
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
     profile_pic = models.ImageField(upload_to = 'worker/profile_pic/', null=True, blank=True)
+    users = models.ManyToManyField(CustomUser, through='Requests', related_name='workers')
+    location = models.CharField(max_length=255)
+    lat = models.DecimalField(max_digits=25, decimal_places=20)
+    lng = models.DecimalField(max_digits=25, decimal_places=20)
+
+    
 
     def __str__(self):
         return str(self.user.email)
@@ -60,4 +66,18 @@ class Services(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     price = models.IntegerField()
-    # is_approved = models.BooleanField(default=False)
+    
+class Requests(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='request')
+    worker = models.ForeignKey(WorkerProfile, on_delete=models.CASCADE, related_name='request')
+    service = models.ForeignKey(Services, on_delete=models.CASCADE, related_name='request')
+    description = models.TextField()
+    STATUS_CHOICES = [
+        ('request_sent', 'Request Sent'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='request_sent')
+    created_at = models.DateTimeField(default=timezone.now)
+    

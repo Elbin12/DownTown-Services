@@ -1,7 +1,7 @@
 from rest_framework import serializers
-from .models import WorkerProfile, CustomWorker, Services
+from .models import WorkerProfile, CustomWorker, Services, Requests
 from django.contrib.auth.hashers import make_password   
-from accounts.serializer import CategoriesAndSubCategories
+from accounts.serializer import CategoriesAndSubCategories, CustomUserSerializer,ProfileSerializer
 from admin_auth.models import Categories
 import os
 from datetime import datetime
@@ -44,6 +44,7 @@ class WorkerLoginSerializer(serializers.ModelSerializer):
         fields = ['email', 'password']
 
 class WorkerDetailSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='worker_profile.id', read_only=True)
     first_name = serializers.CharField(source='worker_profile.first_name')
     last_name = serializers.CharField(source='worker_profile.last_name',required=False, allow_null=True)
     dob = serializers.DateField(source='worker_profile.dob', required=False, allow_null=True)
@@ -52,12 +53,15 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=False)
     mob = serializers.CharField()
     isWorker = serializers.BooleanField(source='is_staff')
+    lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
+    lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
+    location = serializers.CharField(source='worker_profile.location', read_only = True)
 
     class Meta:
         model = CustomWorker
         fields = [
-            'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic'
+            'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location'
         ]
 
     def validate(self, data):
@@ -72,6 +76,24 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
         if image_url:
             return image_url
         return None
+    
+class RequestsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Requests
+        fields = '__all__'
+
+
+class ServiceListingSerializer(serializers.ModelSerializer):
+    pic = serializers.SerializerMethodField()
+    class Meta:
+        model = Services
+        fields = '__all__'
+
+    def get_pic(self, instance):
+        image_url = create_presigned_url(str(instance.pic))
+        if image_url:
+            return image_url
+        return None
 
 class ServiceSerializer(serializers.ModelSerializer):
     workerProfile = WorkerDetailSerializer(source='worker', read_only=True)
@@ -82,7 +104,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Services
-        fields = ['workerProfile','id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'status' ]
+        fields = ['workerProfile', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'status' ]
         read_only_fields = ['worker']
     
     def validate(self, attrs):
@@ -134,3 +156,38 @@ class ServiceSerializer(serializers.ModelSerializer):
         if image_url:
             return image_url
         return None
+
+class ServiceListingDetailSerializer(serializers.ModelSerializer):
+    workerProfile = WorkerDetailSerializer(source='worker', read_only=True)
+    category_name = serializers.CharField(source='category.category_name', read_only=True)
+    subcategory_name = serializers.CharField(source='subcategory.subcategory_name', read_only=True) 
+    pic = serializers.SerializerMethodField()
+    status = serializers.BooleanField(default=True, read_only=True)
+    request = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Services
+        fields = ['workerProfile', 'request', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'status' ]
+        read_only_fields = ['worker']
+
+    def get_request(self, obj):
+        user = self.context.get('request').user
+        print(user)
+        if user.is_authenticated:
+            service_request = Requests.objects.filter(user=user, service=obj).first()
+            if service_request:
+                return RequestsSerializer(service_request).data
+        return False
+    
+    def get_pic(self, instance):
+        image_url = create_presigned_url(str(instance.pic))
+        if image_url:
+            return image_url
+        return None
+    
+class RequestListingDetails(serializers.ModelSerializer):
+    user = ProfileSerializer(source='user.user_profile')
+    service = ServiceListingSerializer()
+    class Meta:
+        model = Requests
+        fields = [ 'id', 'user', 'service', 'description', 'status']

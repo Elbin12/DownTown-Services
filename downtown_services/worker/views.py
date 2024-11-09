@@ -3,8 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser
-from .models import CustomWorker, WorkerProfile, Services
-from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer
+from .models import CustomWorker, WorkerProfile, Services, Requests
+from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails
 
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -192,11 +192,11 @@ class ServicesManage(APIView):
         try:
             return Services.objects.get(id=pk)
         except Services.DoesNotExist:
-            return Response(f'subcategory not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+            return Response(f'service not found on {pk}', status=status.HTTP_404_NOT_FOUND)
 
     def get(self, request):
         services = Services.objects.filter(worker=request.user)
-        serializer = ServiceSerializer(services, many=True)
+        serializer = ServiceListingSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):
@@ -220,3 +220,48 @@ class ServicesManage(APIView):
         service = self.get_object(pk)
         service.delete()
         return Response(status=status.HTTP_200_OK)
+
+
+class WorkerRequests(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        print(request.user)
+        worker = CustomWorker.objects.get(email=request.user)
+        requests = Requests.objects.filter(worker=worker.worker_profile, status='request_sent')
+        serializer = RequestListingDetails(requests,many=True)
+        print(serializer.data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        print(request.data, 'data')
+        request_status = request.data.get('request')
+        request_id = request.data.get('request_id')
+        request = Requests.objects.filter(id=request_id).first()
+        if request_status:
+            if request_status in ['accepted', 'rejected']:
+                request.status = request_status
+                request.save()
+                return Response({"message": f"Request status updated to {request_status}."}, status=status.HTTP_200_OK)
+            else:
+                return Response({"error": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+
+class ChangeLocation(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        location = request.data.get('location')
+        try:
+            user_profile = WorkerProfile.objects.get(user=request.user)
+            user_profile.lat = lat
+            user_profile.lng = lng
+            user_profile.location = location
+            user_profile.save()
+            serializer = WorkerDetailSerializer(request.user)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except WorkerProfile.DoesNotExist:
+            return Response({'error':'No user profile'}, status=status.HTTP_404_NOT_FOUND)

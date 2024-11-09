@@ -34,7 +34,7 @@ class UserGetSerializer(serializers.ModelSerializer):
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = UserProfile
-        fields = ['email', 'mob', 'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
+        fields = ['email', 'mob', 'first_name', 'last_name', 'dob','lat', 'lng', 'location', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
     
     def get_profile_pic(self, obj):
         image_url = create_presigned_url(str(obj.profile_pic))

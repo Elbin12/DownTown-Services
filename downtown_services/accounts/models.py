@@ -60,6 +60,10 @@ class UserProfile(models.Model):
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
     profile_pic = models.FileField(upload_to = 'users/profile_pic/', null=True, blank=True)
+    location = models.CharField(max_length=255)
+    lat = models.DecimalField(max_digits=25, decimal_places=20)
+    lng = models.DecimalField(max_digits=25, decimal_places=20)
+
 
     def __str__(self):
         return str(self.user.email)

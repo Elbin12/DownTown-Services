@@ -77,14 +77,17 @@ class customAuthentication(JWTAuthentication):
             return None
 
         try:
-            print(raw_token, 'raw')
             validated_token = self.get_validated_token(raw_token)
+            print(raw_token,validated_token, 'raw')
         except Exception as e:
             print('hi')
             if request.path.startswith('/worker'):
                 refresh_token = request.COOKIES.get('worker_refresh_token')
+                print(refresh_token, 'refresh')
+                user_type = 'worker'
             else:
                 refresh_token = request.COOKIES.get('refresh_token')
+                user_type = 'user'
             if refresh_token is None:
                     raise AuthenticationFailed('Authentication credentials were not provided.')
             try:
@@ -93,11 +96,18 @@ class customAuthentication(JWTAuthentication):
 
                 token_refresh_view = TokenRefreshView.as_view()
                 response = token_refresh_view(token_refresh_request)
+                print(response, 'response')
 
                 if response.status_code == 200:
                     new_access_token = response.data.get('access')
                     validated_token = self.get_validated_token(new_access_token)
+                    validated_token['user_type'] = user_type
+                    print(validated_token, 'val')
+                    request.META['USER_TYPE'] = user_type
                     request.META['NEW_ACCESS_TOKEN'] = new_access_token
+                elif response.status_code == 401:
+                    print(response.data, 'err')
+                    raise AuthenticationFailed({'message':'Refresh token is not valid.'})
             except Exception as e:
                     raise AuthenticationFailed('Refresh token is expired.')
 

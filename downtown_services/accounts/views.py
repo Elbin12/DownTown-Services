@@ -14,8 +14,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories
 from admin_auth.models import Categories, SubCategories
-from worker.serializer import ServiceSerializer
-from worker.models import Services
+from worker.serializer import ServiceSerializer, RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer
+from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
 from django.db.models import Q
@@ -316,9 +316,11 @@ class ServicesView(APIView):
 
             services = Services.objects.filter(filters) if filters else Services.objects.all()
             
-            serializer = ServiceSerializer(services, many=True)
+            serializer = ServiceListingSerializer(services, many=True)  
+            print(serializer, 'ss')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
+            print(e, 'e')
             return Response({"detail": "An error occurred while retrieving services."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def post(self, request):
@@ -335,7 +337,8 @@ class ServicesView(APIView):
                 if cat:
                     services_q |= Q(category=cat, subcategory__in=items)
             services = services.filter(services_q).distinct()
-            serializer = ServiceSerializer(services, many=True)
+            serializer = ServiceListingSerializer(services, many=True)
+            print(serializer.data, 'data')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": "An error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -346,9 +349,73 @@ class ServiceDetail(APIView):
     def get(self, request, pk):
         try:
             service = Services.objects.get(id=pk)
-            serializer = ServiceSerializer(service)
+            serializer = ServiceListingDetailSerializer(service, context={'request': request})
+            print(serializer.data, 'data')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Services.DoesNotExist:
             return Response({'message':'Service does not exist'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
+            print(e, 'e')
             return Response({"detail": "An error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class ServiceRequests(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        print(request.data, 'data')
+        worker_id = request.data.get('worker_id')
+        service_id = request.data.get('service_id')
+        description = request.data.get('description')
+        try:
+            worker = CustomWorker.objects.get(id=worker_id)
+            print(worker, 'worker')
+            worker_profile = WorkerProfile.objects.get(user=worker)
+            service = Services.objects.get(id=service_id)
+        except WorkerProfile.DoesNotExist:
+            return Response({'error':'Worker not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Services.DoesNotExist:
+            return Response({'error':'Service not found or does not belong to this worker'}, status=status.HTTP_404_NOT_FOUND)
+        
+        service_request, created = Requests.objects.get_or_create(
+            user=request.user,
+            worker=worker_profile,
+            service=service,
+            defaults={'status': 'request_sent'},
+        )
+        service_request.description = description
+        service_request.status = 'request_sent'
+        service_request.save()
+        serailizer = RequestsSerializer(service_request)
+        return Response(serailizer.data, status=status.HTTP_201_CREATED)
+    
+class CancelRequest(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        request_id = request.data.get('request_id')
+        try:
+            request_obj = Requests.objects.get(id=request_id)
+            request_obj.status = 'cancelled'
+            request_obj.save()
+            serailizer = RequestsSerializer(request_obj)
+            return Response({'message':'Request is cancelled', 'data':serailizer.data}, status=status.HTTP_200_OK)
+        except Requests.DoesNotExist:
+            return Response({'error':'Request doesnot exists'}, status=status.HTTP_404_NOT_FOUND)
+        
+class ChangeLocation(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        location = request.data.get('location')
+        try:
+            user_profile = UserProfile.objects.get(user=request.user)
+            user_profile.lat = lat
+            user_profile.lng = lng
+            user_profile.location = location
+            user_profile.save()
+            serializer = UserGetSerializer(user_profile)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except UserProfile.DoesNotExist:
+            return Response({'error':'No user profile'}, status=status.HTTP_404_NOT_FOUND)
