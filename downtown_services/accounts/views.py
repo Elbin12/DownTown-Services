@@ -12,19 +12,22 @@ from django.conf import settings
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories
+from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer
 from admin_auth.models import Categories, SubCategories
 from worker.serializer import ServiceSerializer, RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer
 from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
 from django.db.models import Q
-from .utils import upload_fileobj_to_s3, create_presigned_url
+from .utils import upload_fileobj_to_s3, create_presigned_url, AuthenticateIfJWTProvided, find_distance, find_distance_for_anonymoususer, get_nearby_services, get_nearby_services_for_anonymoususer
 
 import os
 from datetime import datetime
 from django.db.models import Count
 import requests
+
+
+from django.contrib.auth.models import AnonymousUser
 
 # Create your views here.
 
@@ -303,7 +306,7 @@ class GetCategories(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
 class ServicesView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [AuthenticateIfJWTProvided]
     authentication_classes = []
 
     def get(self, request):
@@ -315,7 +318,16 @@ class ServicesView(APIView):
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
 
             services = Services.objects.filter(filters) if filters else Services.objects.all()
-            
+            print(request.user, 'user')
+            if isinstance(request.user, AnonymousUser):
+                lat = request.session.get('lat')
+                lng = request.session.get('lng')
+                print(request.session.get('location'), 'location', lat, lng)
+                services = get_nearby_services_for_anonymoususer(lat, lng, services)
+                print(services, 'services')
+            elif isinstance(request.user, CustomUser):
+                services = get_nearby_services(request.user, services)
+
             serializer = ServiceListingSerializer(services, many=True)  
             print(serializer, 'ss')
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -329,7 +341,8 @@ class ServicesView(APIView):
             filters = Q()
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
-            services = Services.objects.filter(filters) if filters else Services.objects.all()
+            print('ser', search_key, request.user)
+            services = services.filter(filters) if filters else Services.objects.all()
             selected = request.data.get('selected_sub')
             services_q = Q()
             for key, items in selected.items():
@@ -337,10 +350,17 @@ class ServicesView(APIView):
                 if cat:
                     services_q |= Q(category=cat, subcategory__in=items)
             services = services.filter(services_q).distinct()
+            if isinstance(request.user, AnonymousUser):
+                lat = request.session.get('lat')
+                lng = request.session.get('lng')
+                services = get_nearby_services_for_anonymoususer(lat, lng, services)
+            elif isinstance(request.user, CustomUser):
+                services = get_nearby_services(request.user, services)
             serializer = ServiceListingSerializer(services, many=True)
             print(serializer.data, 'data')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
+            print(e, 'e')
             return Response({"detail": "An error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class ServiceDetail(APIView):
@@ -349,6 +369,14 @@ class ServiceDetail(APIView):
     def get(self, request, pk):
         try:
             service = Services.objects.get(id=pk)
+            if isinstance(request.user, AnonymousUser):
+                lat = request.session.get('lat')
+                lng = request.session.get('lng')
+                if find_distance_for_anonymoususer(lat, lng, service.worker.worker_profile) > 10:
+                    return Response({'error':'Service is not available in your city'}, status=status.HTTP_400_BAD_REQUEST)
+            elif isinstance(request.user, CustomUser):
+                if find_distance(request.user, service.worker.worker_profile) > 10:
+                    return Response({'error':'Service is not available in your city'}, status=status.HTTP_400_BAD_REQUEST)
             serializer = ServiceListingDetailSerializer(service, context={'request': request})
             print(serializer.data, 'data')
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -403,19 +431,33 @@ class CancelRequest(APIView):
             return Response({'error':'Request doesnot exists'}, status=status.HTTP_404_NOT_FOUND)
         
 class ChangeLocation(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         lat = request.data.get('lat')
         lng = request.data.get('lng')
         location = request.data.get('location')
+        print(request.user, 'user')
         try:
-            user_profile = UserProfile.objects.get(user=request.user)
-            user_profile.lat = lat
-            user_profile.lng = lng
-            user_profile.location = location
-            user_profile.save()
-            serializer = UserGetSerializer(user_profile)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except UserProfile.DoesNotExist:
-            return Response({'error':'No user profile'}, status=status.HTTP_404_NOT_FOUND)
+            if isinstance(request.user, AnonymousUser):
+                request.session['location'] = location
+                request.session['lat'] = lat
+                request.session['lng'] = lng
+                return Response({'lat':lat, 'lng':lng, 'location':location}, status=status.HTTP_200_OK)
+            else:
+                user = request.user
+                user.lat = lat
+                user.lng = lng
+                user.location = location
+                user.save()
+                try:
+                    user_profile = UserProfile.objects.get(user=user)
+                    serializer = UserGetSerializer(user_profile)
+                except UserProfile.DoesNotExist:
+                    serializer = CustomUserSerializer(user)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+        except CustomUser.DoesNotExist:
+            return Response({'error':'No user'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            print(e, 'e')
+            return Response({'error':'An unexcepted error occured.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

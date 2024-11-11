@@ -9,7 +9,7 @@ from .utils import create_presigned_url
 class CustomUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['email', 'mob']  
+        fields = '__all__'
 
 class ProfileSerializer(serializers.ModelSerializer):
     mob = serializers.CharField(source='user.mob')
@@ -31,6 +31,9 @@ class UserGetSerializer(serializers.ModelSerializer):
     mob = serializers.CharField(source='user.mob')
     is_Active = serializers.BooleanField(source='user.is_active')
     is_Admin = serializers.BooleanField(source='user.is_superuser')
+    location = serializers.CharField(source='user.location')
+    lat = serializers.DecimalField(source='user.lat', max_digits=25, decimal_places=20)
+    lng = serializers.DecimalField(source='user.lng', max_digits=25, decimal_places=20)
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = UserProfile
