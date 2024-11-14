@@ -28,4 +28,6 @@ urlpatterns = [
     path('services/', views.ServicesManage.as_view()),
     path('services/<int:pk>/', views.ServicesManage.as_view(), name='services-edit'),
     path('requests/', views.WorkerRequests.as_view()),
+    path('accepted-requests/', views.AcceptedServices.as_view()),
+    path('accepted-service/<int:pk>/', views.AcceptedService.as_view()),
 ]

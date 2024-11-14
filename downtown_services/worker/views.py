@@ -16,9 +16,13 @@ from admin_auth.models import Categories
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from accounts.utils import upload_fileobj_to_s3
+from accounts.models import Orders, OrderTracking
+from accounts.serializer import UserOrderSerializer
 import time
 import os
 from datetime import datetime
+
+from django.db.models import Q
 # Create your views here.
 
 
@@ -237,11 +241,15 @@ class WorkerRequests(APIView):
         print(request.data, 'data')
         request_status = request.data.get('request')
         request_id = request.data.get('request_id')
-        request = Requests.objects.filter(id=request_id).first()
+        request_obj = Requests.objects.filter(id=request_id).first()
         if request_status:
             if request_status in ['accepted', 'rejected']:
-                request.status = request_status
-                request.save()
+                request_obj.status = request_status
+                request_obj.save()
+                if request_obj.status == 'accepted':
+                    # if Orders.objects.filter(user=request_obj.user, service_provider=request_obj.worker)
+                    order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
+                    OrderTracking.objects.create(order=order)
                 return Response({"message": f"Request status updated to {request_status}."}, status=status.HTTP_200_OK)
             else:
                 return Response({"error": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
@@ -265,3 +273,24 @@ class ChangeLocation(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except WorkerProfile.DoesNotExist:
             return Response({'error':'No user profile'}, status=status.HTTP_404_NOT_FOUND)
+        
+class AcceptedServices(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working')))
+        accepted_requests = Requests.objects.filter(worker=request.user.worker_profile, status='accepted')
+        serializer = UserOrderSerializer(uncompleted_orders, many=True)
+        print('hi')
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class AcceptedService(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            order = Orders.objects.get(id=pk)
+            serializer = UserOrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)

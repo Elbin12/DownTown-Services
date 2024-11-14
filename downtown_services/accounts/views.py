@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser, UserProfile
+from .models import CustomUser, UserProfile, Orders, OrderTracking
 
 import random
 from django.conf import settings
@@ -12,9 +12,9 @@ from django.conf import settings
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer
+from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer
 from admin_auth.models import Categories, SubCategories
-from worker.serializer import ServiceSerializer, RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer
+from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer
 from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
@@ -461,3 +461,50 @@ class ChangeLocation(APIView):
         except Exception as e:
             print(e, 'e')
             return Response({'error':'An unexcepted error occured.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class OrderView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            order = Orders.objects.get(id=pk)
+            serializer = UserOrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Requests.DoesNotExist:
+            return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+        
+class FindOrderFromRequest(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            request_obj = Requests.objects.get(id=pk)
+            print(request_obj.service.service_name)
+            order_obj = Orders.objects.get(user=request_obj.user, service_provider=request_obj.worker.user, service_name=request_obj.service.service_name)
+            serializer = UserOrderSerializer(order_obj)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Requests.DoesNotExist:
+            return Response(f'Request not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+        except Orders.DoesNotExist:
+            return Response(f'Order not found with request id {pk}', status=status.HTTP_404_NOT_FOUND)
+        
+        
+class WorkerArrived(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        order_id = request.data.get('order_id')
+        print(order_id, 'idddd')
+        try:
+            order = Orders.objects.get(id=order_id)
+            order_tracking = order.status_tracking
+            order_tracking.is_worker_arrived = True
+            order_tracking.arrival_time = datetime.now()
+            order_tracking.save()
+            serializer = UserOrderTrackingSerializer(order_tracking)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        except OrderTracking.DoesNotExist:
+            return Response({"error": "Order tracking data not found."}, status=status.HTTP_404_NOT_FOUND)
+    

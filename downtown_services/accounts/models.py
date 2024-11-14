@@ -68,3 +68,32 @@ class UserProfile(models.Model):
     def __str__(self):
         return str(self.user.email)
         
+
+class Orders(models.Model):
+    user = models.ForeignKey('accounts.CustomUser', on_delete=models.CASCADE, related_name='orders')
+    service_provider = models.ForeignKey('worker.CustomWorker', on_delete=models.CASCADE, related_name='serviced_orders')
+
+    service_name = models.CharField(max_length=255)
+    service_description = models.TextField()
+    service_price = models.DecimalField(max_digits=10, decimal_places=2)
+    service_image_url = models.URLField(max_length=500)
+
+    user_description = models.TextField(null=True)
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('working', 'Working'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class OrderTracking(models.Model):
+    order = models.OneToOneField(Orders, on_delete=models.CASCADE, related_name='status_tracking')
+    is_worker_arrived = models.BooleanField(default=False)
+    is_work_started = models.BooleanField(default=False)
+    arrival_time = models.DateTimeField(null=True, blank=True) 
+    work_start_time = models.DateTimeField(null=True, blank=True) 
+    work_end_time = models.DateTimeField(null=True, blank=True)
+    

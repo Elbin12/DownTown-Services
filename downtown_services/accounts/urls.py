@@ -34,6 +34,9 @@ urlpatterns = [
    path('service/<int:pk>/', views.ServiceDetail.as_view()),
    path('service-request/', views.ServiceRequests.as_view()),
    path('cancel-request/', views.CancelRequest.as_view()),
+   path('find-order/<int:pk>/', views.FindOrderFromRequest.as_view()),
+   path('worker-arrived/', views.WorkerArrived.as_view()),
+   path('order/<int:pk>/', views.OrderView.as_view()),
 ]
 
 

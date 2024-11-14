@@ -1,8 +1,7 @@
 from rest_framework import serializers
-from .models import WorkerProfile, CustomWorker, Services, Requests
+from .models import CustomWorker, Services, Requests
 from django.contrib.auth.hashers import make_password   
-from accounts.serializer import CategoriesAndSubCategories, CustomUserSerializer,ProfileSerializer
-from admin_auth.models import Categories
+from accounts.serializer import ProfileSerializer
 import os
 from datetime import datetime
 from accounts.utils import upload_fileobj_to_s3, create_presigned_url
