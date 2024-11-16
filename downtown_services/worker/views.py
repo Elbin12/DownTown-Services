@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
-from accounts.models import CustomUser
+from accounts.models import CustomUser, OrderPayment, Additional_charges
 from .models import CustomWorker, WorkerProfile, Services, Requests
 from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails
 
@@ -18,8 +18,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from accounts.utils import upload_fileobj_to_s3
 from accounts.models import Orders, OrderTracking
 from accounts.serializer import UserOrderSerializer
-import time
-import os
+
+import os, json
 from datetime import datetime
 
 from django.db.models import Q
@@ -37,8 +37,7 @@ class CheckingCredentials(APIView):
             return Response({'message':'An account is already registered with this email'}, status=status.HTTP_400_BAD_REQUEST)
         if CustomWorker.objects.filter(mob=mob).exists():
             return Response({'message':'An account is already registered with this mobile number'}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = GetCategories(Categories.objects.all(), many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response( status=status.HTTP_200_OK)
 
 class SignUp(APIView):
     permission_classes = [permissions.AllowAny]
@@ -278,7 +277,7 @@ class AcceptedServices(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working')))
+        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) | (Q(status='pending') | Q(status='working') | Q(order_payment__status='unPaid')))
         accepted_requests = Requests.objects.filter(worker=request.user.worker_profile, status='accepted')
         serializer = UserOrderSerializer(uncompleted_orders, many=True)
         print('hi')
@@ -294,3 +293,71 @@ class AcceptedService(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+class WorkCompleted(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        order_id = request.data.get('order_id', None)
+        try:
+            order = Orders.objects.get(id = order_id)
+            order_tracking = order.status_tracking
+            order_tracking.work_end_time = datetime.now()
+            order.status = 'completed'
+            order_tracking.save()
+            order.save()
+            serializer = UserOrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+class AddPayment(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request):
+        order_id = request.data.get('order_id')
+        additional_charges = request.data.get('additional_charges', [])
+
+        if isinstance(additional_charges, str):
+            try:
+                additional_charges = json.loads(additional_charges)
+            except json.JSONDecodeError:
+                return Response({"error": "Invalid JSON format in additional_charges"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        for index, charge in enumerate(additional_charges):
+            file_key = f'image_{index}'
+            if file_key in request.FILES:
+                charge['image'] = request.FILES[file_key]
+
+        print(additional_charges, 'addd')
+        try:
+            order = Orders.objects.get(id=order_id)
+            total_amount = order.service_price
+            payment = OrderPayment.objects.create(order=order)
+            if additional_charges:
+                for charge in additional_charges:
+                    additional_charge = Additional_charges.objects.create(order_payment=payment, description=charge['description'], price=int(charge['amount']))
+                    image_file = charge.get('image')
+                    total_amount += int(charge.get('amount'))
+                    if image_file:      
+                        try:
+                            file_extension = os.path.splitext(image_file.name)[1]
+                            current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            unique_filename = f"{current_time_str}{file_extension}"
+                            s3_file_path = f"users/payment/receipts/{unique_filename}"
+
+                            image_url = upload_fileobj_to_s3(image_file, s3_file_path)
+                            if image_url:
+                                additional_charge.image = s3_file_path
+                                additional_charge.save()
+                            else:
+                                return Response({'error': 'File upload failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        except Exception as e:
+                            print(e)
+                            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            payment.total_amount = total_amount
+            payment.save()
+            return Response(status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)

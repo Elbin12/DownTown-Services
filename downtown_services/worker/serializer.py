@@ -103,7 +103,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Services
-        fields = ['workerProfile', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'status' ]
+        fields = ['workerProfile', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'is_active', 'status' ]
         read_only_fields = ['worker']
     
     def validate(self, attrs):
@@ -117,7 +117,7 @@ class ServiceSerializer(serializers.ModelSerializer):
                 })
         else:
             if Services.objects.filter(service_name=service_name, worker=worker).exclude(id=self.instance.id).exists():
-                raise serializers.ValidationError('A service with this name already exists')
+                raise serializers.ValidationError({'message': 'A service with this name already exists'})
         return attrs
     
     def create(self, validated_data):

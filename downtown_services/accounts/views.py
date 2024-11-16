@@ -26,7 +26,6 @@ from datetime import datetime
 from django.db.models import Count
 import requests
 
-
 from django.contrib.auth.models import AnonymousUser
 
 # Create your views here.
@@ -312,12 +311,12 @@ class ServicesView(APIView):
     def get(self, request):
         try:
             search_key = request.query_params.get('search_key', None)
-            services = Services.objects.all()
+            services = Services.objects.filter(is_active=True)
             filters = Q()
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
 
-            services = Services.objects.filter(filters) if filters else Services.objects.all()
+            services = Services.objects.filter(filters) if filters else Services.objects.filter(is_active=True)
             print(request.user, 'user')
             if isinstance(request.user, AnonymousUser):
                 lat = request.session.get('lat')
@@ -342,7 +341,7 @@ class ServicesView(APIView):
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
             print('ser', search_key, request.user)
-            services = services.filter(filters) if filters else Services.objects.all()
+            services = services.filter(filters) if filters else Services.objects.filter(is_active=True)
             selected = request.data.get('selected_sub')
             services_q = Q()
             for key, items in selected.items():
@@ -500,6 +499,8 @@ class WorkerArrived(APIView):
             order_tracking = order.status_tracking
             order_tracking.is_worker_arrived = True
             order_tracking.arrival_time = datetime.now()
+            order_tracking.work_start_time = datetime.now()
+            order_tracking.is_work_started = True
             order_tracking.save()
             serializer = UserOrderTrackingSerializer(order_tracking)
             return Response(serializer.data, status=status.HTTP_200_OK)

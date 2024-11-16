@@ -30,4 +30,6 @@ urlpatterns = [
     path('requests/', views.WorkerRequests.as_view()),
     path('accepted-requests/', views.AcceptedServices.as_view()),
     path('accepted-service/<int:pk>/', views.AcceptedService.as_view()),
+    path('work-completed/', views.WorkCompleted.as_view()),
+    path('add-payment/', views.AddPayment.as_view()),
 ]

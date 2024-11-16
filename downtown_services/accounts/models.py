@@ -97,3 +97,20 @@ class OrderTracking(models.Model):
     work_start_time = models.DateTimeField(null=True, blank=True) 
     work_end_time = models.DateTimeField(null=True, blank=True)
     
+class OrderPayment(models.Model):
+    order = models.OneToOneField(Orders, on_delete=models.CASCADE, related_name='order_payment')
+    total_amount = models.IntegerField(null=True, blank=True)
+    STATUS_CHOICES = [
+        ('unPaid', 'UnPaid'),
+        ('paid', 'Paid'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='unPaid')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+
+class Additional_charges(models.Model):
+    order_payment = models.ForeignKey(OrderPayment, on_delete=models.CASCADE, related_name='additional_charges')
+    description = models.TextField()
+    price = models.IntegerField()
+    image = models.FileField(upload_to = 'users/payment/receipts/', null=True, blank=True)

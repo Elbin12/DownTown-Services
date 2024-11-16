@@ -12,6 +12,7 @@ urlpatterns = [
    path('requests/', views.Requests.as_view()),
    path('handle_requests/', views.HandleRequest.as_view()),
    path('services/', views.GetServices.as_view()),
+   path('service/<int:pk>/', views.GetService.as_view()),
    path('categories/', views.CategoryManage.as_view(), name='category-list'),
    path('categories/<int:pk>/', views.CategoryManage.as_view(), name='category-edit'),
    path('subcategories/', views.Subcategory.as_view(), name='subcategory-list'),

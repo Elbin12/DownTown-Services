@@ -211,3 +211,29 @@ class GetServices(APIView):
         services = Services.objects.all()
         serializer = ServiceSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class GetService(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, pk):
+        try:
+            service = Services.objects.get(id=pk)
+            serializer = ServiceSerializer(service)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Services.DoesNotExist:
+            return Response({'error':'Service not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+    # Block Serive 
+    def post(self, request, pk):
+        try:
+            service = Services.objects.get(id=pk)
+            if service.is_active:
+                service.is_active = False
+            else:
+                service.is_active = True
+            service.save()
+            serializer = ServiceSerializer(service)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Services.DoesNotExist:
+            return Response({'error':'Service not found'}, status=status.HTTP_404_NOT_FOUND)
+    

@@ -128,7 +128,7 @@ class customAuthentication(JWTAuthentication):
             response.delete_cookie(refresh)
             response.delete_cookie(access)
             response.delete_cookie('csrftoken')
-            raise AuthenticationFailed({'message':'User is blocked by admin.'})
+            raise AuthenticationFailed({'message':'User is blocked by admin.', 'type':'block'})
         print('hiiiii')
         request.user = user
         print(request.user, 'from auth user')

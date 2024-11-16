@@ -66,6 +66,7 @@ class Services(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     price = models.IntegerField()
+    is_active = models.BooleanField(default=True)
     
 class Requests(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='request')

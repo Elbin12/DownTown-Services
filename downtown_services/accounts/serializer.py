@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from . models import CustomUser, UserProfile, Orders, OrderTracking
+from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges
 from admin_auth.models import Categories, SubCategories
 from .utils import create_presigned_url
 
@@ -74,6 +74,24 @@ class UserOrderTrackingSerializer(serializers.ModelSerializer):
         model = OrderTracking
         fields = '__all__'
 
+class AdditionalChargesSerializer(serializers.ModelSerializer):
+    reciept_img = serializers.SerializerMethodField()
+    class Meta:
+        model = Additional_charges
+        fields = ['id', 'order_payment', 'description', 'reciept_img', 'price']
+    
+    def get_reciept_img(self, instance):
+        image_url = create_presigned_url(str(instance.image))
+        if image_url:
+            return image_url
+        return None
+    
+class PaymentSerializer(serializers.ModelSerializer):
+    additional_charges = AdditionalChargesSerializer(many=True, read_only=True)
+    class Meta:
+        model = OrderPayment
+        fields = ['id', 'order', 'total_amount', 'status', 'created_at', 'updated_at', 'additional_charges']
+
 class UserOrderSerializer(serializers.ModelSerializer):
     from worker.serializer import WorkerDetailSerializer
 
@@ -81,9 +99,10 @@ class UserOrderSerializer(serializers.ModelSerializer):
     order_tracking = UserOrderTrackingSerializer(source='status_tracking',read_only = True)
     worker = serializers.SerializerMethodField(read_only = True)
     service_image = serializers.SerializerMethodField()
+    payment_details = serializers.SerializerMethodField()
     class Meta:
         model = Orders
-        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at']
+        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details']
 
     def get_service_image(self, instance):
         image_url = create_presigned_url(str(instance.service_image_url))
@@ -94,6 +113,17 @@ class UserOrderSerializer(serializers.ModelSerializer):
     def get_worker(self, instance):
         from worker.serializer import WorkerDetailSerializer
         return WorkerDetailSerializer(instance.service_provider).data
+    
+    def get_payment_details(self, instance):
+        if hasattr(instance, 'order_payment'):  
+            payment = instance.order_payment  
+            payment_data = PaymentSerializer(payment).data  
+            if hasattr(payment, 'additional_charges'):
+                additional_charges = payment.additional_charges.all()  
+                additional_charges_data = AdditionalChargesSerializer(additional_charges, many=True).data
+                payment_data['additional_charges'] = additional_charges_data
+            return payment_data
+        return None
     
 class RequestListingDetails(serializers.ModelSerializer):
     worker = serializers.SerializerMethodField()
@@ -109,3 +139,4 @@ class RequestListingDetails(serializers.ModelSerializer):
     def get_service(self, instance):
         from worker.serializer import ServiceListingSerializer
         return ServiceListingSerializer(instance.service).data
+
