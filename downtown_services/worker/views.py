@@ -10,7 +10,7 @@ import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
 from .serializer import WorkerDetailSerializer
-from admin_auth.serializer import GetCategories
+from admin_auth.serializer import GetCategories, GetCategoriesOnly
 from admin_auth.models import Categories
 
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -37,12 +37,25 @@ class CheckingCredentials(APIView):
             return Response({'message':'An account is already registered with this email'}, status=status.HTTP_400_BAD_REQUEST)
         if CustomWorker.objects.filter(mob=mob).exists():
             return Response({'message':'An account is already registered with this mobile number'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response( status=status.HTTP_200_OK)
+        serializer = GetCategoriesOnly(Categories.objects.all(), many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class SignUp(APIView):
     permission_classes = [permissions.AllowAny]
     def post(self, request):
-        serializer = WorkerRegisterSerializer(data=request.data)
+        print(request.FILES, 'files', request.data)
+        data = request.data
+        if 'services' in request.data and isinstance(request.data['services'], str):
+            try:
+                request.data['services'] = json.loads(request.data['services'])
+                print(data, 'dddd')
+            except json.JSONDecodeError:
+                return Response({'services': 'Invalid format for services.'}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                print(e)
+                return Response({'services': 'Invalid data.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        serializer = WorkerRegisterSerializer(data=data)
         if serializer.is_valid():
             print('llll')
             serializer.save()

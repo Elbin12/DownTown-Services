@@ -97,6 +97,18 @@ class Workers(APIView):
         serializer = GetWorkers(workers, many=True)
         return Response({'workers': serializer.data, 'pagination': pagination}, status=status.HTTP_200_OK)
     
+class Worker(APIView):
+    permission_classes = [permissions.IsAdminUser]
+    def get(self, request, pk):
+        try:
+            worker = CustomWorker.objects.get(id=pk)
+            serializer = GetWorkers(worker)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except CustomWorker.DoesNotExist:
+            return Response({'error':'worker do not found.'}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error':'Something went wrong'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 
 class Requests(APIView):
     permission_classes = [permissions.IsAdminUser]

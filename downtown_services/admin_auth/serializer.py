@@ -33,12 +33,25 @@ class GetUsers(serializers.ModelSerializer):
 class GetWorkers(serializers.ModelSerializer):
     first_name = serializers.CharField(source='worker_profile.first_name', default=None)  
     last_name = serializers.CharField(source='worker_profile.last_name', default=None)
-    profile_pic = serializers.ImageField(source='worker_profile.profile_pic', default=None)
     Name = serializers.SerializerMethodField()
     profile_pic = serializers.SerializerMethodField()
+    location = serializers.CharField(source='worker_profile.location', required=True)
+    lat = serializers.DecimalField(source='worker_profile.lat', max_digits=25, decimal_places=20)
+    lng = serializers.DecimalField(source='worker_profile.lng', max_digits=25, decimal_places=20)
+    aadhaar_no = serializers.CharField(source='worker_profile.aadhaar_no')
+    experience = serializers.CharField(source='worker_profile.experience')
+    certificate = serializers.SerializerMethodField()
+    services = serializers.SerializerMethodField()
     class Meta:
         model = CustomWorker
-        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic', 'is_active', 'status', 'id']
+        fields = ['first_name', 'last_name', 'email', 'mob', 'Name', 'profile_pic', 'is_active', 'status', 'id', 'location', 'lat', 'lng', 'aadhaar_no', 'experience', 'certificate', 'services']
+
+    def get_services(self, obj):
+        worker_profile = getattr(obj, 'worker_profile', None)
+        if worker_profile and worker_profile.services.exists():
+            services = worker_profile.services.all()
+            return GetCategoriesOnly(services, many=True).data
+        return []
     
     def get_Name(self, obj):
         worker_profile = getattr(obj, 'worker_profile', None)
@@ -48,11 +61,24 @@ class GetWorkers(serializers.ModelSerializer):
     
     def get_profile_pic(self, instance):
         worker_profile = getattr(instance, 'worker_profile', None)
-        if worker_profile:
+        if worker_profile and worker_profile.profile_pic:
             image_url = create_presigned_url(str(worker_profile.profile_pic))
             if image_url:
                 return image_url
         return None
+    
+    def get_certificate(self, instance):
+        worker_profile = getattr(instance, 'worker_profile', None)
+        if worker_profile and worker_profile.certificate:
+            image_url = create_presigned_url(str(worker_profile.certificate))
+            if image_url:
+                return image_url
+        return None	
+    
+class GetCategoriesOnly(serializers.ModelSerializer):
+    class Meta:
+        model = Categories
+        fields = '__all__'
 
 class GetSubcategories(serializers.ModelSerializer):
     class Meta:

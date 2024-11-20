@@ -36,21 +36,23 @@ class CustomWorker(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
-
+    
 
 class WorkerProfile(models.Model):
-    user = models.OneToOneField(CustomWorker, on_delete = models.CASCADE, related_name = 'worker_profile' )
-    first_name = models.CharField(max_length=50)
+    user = models.OneToOneField(CustomWorker, on_delete = models.CASCADE, related_name = 'worker_profile')
+    first_name = models.CharField(max_length=50, null=True, blank=True)
     last_name = models.CharField(max_length=50, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
     profile_pic = models.ImageField(upload_to = 'worker/profile_pic/', null=True, blank=True)
     users = models.ManyToManyField(CustomUser, through='Requests', related_name='workers')
-    location = models.CharField(max_length=255)
+    location = models.CharField(max_length=255, null=True, blank=True)
     lat = models.DecimalField(max_digits=25, decimal_places=20)
-    lng = models.DecimalField(max_digits=25, decimal_places=20)
-
-    
+    lng = models.DecimalField(max_digits=25, decimal_places=20) 
+    aadhaar_no = models.CharField(max_length=12, null=True, blank=True)
+    experience = models.IntegerField(null=True, blank=True)
+    certificate = models.ImageField(upload_to = 'worker/certificate/', null=True, blank=True)
+    services = models.ManyToManyField(Categories, related_name='workers')
 
     def __str__(self):
         return str(self.user.email)

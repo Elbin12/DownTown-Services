@@ -1,34 +1,85 @@
 from rest_framework import serializers
-from .models import CustomWorker, Services, Requests
+from .models import CustomWorker, Services, Requests, WorkerProfile
 from django.contrib.auth.hashers import make_password   
 from accounts.serializer import ProfileSerializer
-import os
+import os, json
 from datetime import datetime
 from accounts.utils import upload_fileobj_to_s3, create_presigned_url
+from admin_auth.models import Categories
 
 
 class WorkerRegisterSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True)
+    location = serializers.CharField(source='worker_profile.location', required=True)
+    lat = serializers.DecimalField(source='worker_profile.lat', max_digits=25, decimal_places=20, required=False)
+    lng = serializers.DecimalField(source='worker_profile.lng', max_digits=25, decimal_places=20, required=False)
+    aadhaar_no = serializers.CharField(source='worker_profile.aadhaar_no', required=True, allow_blank=True)
+    experience = serializers.IntegerField(source='worker_profile.experience', required=True)
+    certificate = serializers.ImageField(source='worker_profile.certificate', required=True)
+    services = services = serializers.ListField(
+        required=True,
+        allow_empty=True,   
+        write_only=True 
+    )
+
     class Meta:
         model = CustomWorker
-        fields = ['email', 'mob', 'password', 'confirm_password']
+        fields = ['email', 'mob', 'password', 'confirm_password', 'location', 'lat', 'lng', 'aadhaar_no', 'experience', 'certificate', 'services']
         extra_kwargs = {
             'password': {'write_only': True} 
         }
 
+    
     def validate(self, data):
+        print(data, 'daata')
         if data['password'] != data['confirm_password']:
             raise serializers.ValidationError({'password': "Passwords do not match."})
+        
+        workerprofile = data.get('worker_profile', {})
+        services = data.pop('services', [])
+        print(services, workerprofile, 'iiii')
+        if services:
+            if isinstance(services, list):
+                workerprofile['services'] = [item for sublist in services for item in sublist]
+                print('Flattened services:', workerprofile['services'])
+        data['worker_profile'] = workerprofile
         return data
 
     
     def create(self, validated_data):
+        profile_data = validated_data.pop('worker_profile', {})
+        cert_img = profile_data.pop('certificate', None)
+        services = profile_data.pop('services', [])
+
         validated_data.pop('confirm_password')
         validated_data['password'] = make_password(validated_data['password'])
+
         groups_data = validated_data.pop('groups', None)
         permissions_data = validated_data.pop('user_permissions', None)
         
         worker = CustomWorker.objects.create(**validated_data)
+        profile = WorkerProfile.objects.create(user=worker, **profile_data)
+
+        if cert_img:
+            file_extension = os.path.splitext(cert_img.name)[1]
+            current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_filename = f"{current_time_str}{file_extension}"
+            s3_file_path = f"workers/certificate/{unique_filename}"
+            try:
+                image_url = upload_fileobj_to_s3(cert_img, s3_file_path)
+                if image_url:
+                    profile.certificate = s3_file_path
+                    print("Image URL:", image_url)
+                else:
+                    raise Exception("File upload to S3 failed")
+            except Exception as e:
+                print(e)
+                raise serializers.ValidationError({'certificate': str(e)})
+
+        if services:
+            profile.services.set(services)
+        
+        profile.save()
 
         if groups_data:
             worker.groups.set(groups_data)
