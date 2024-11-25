@@ -9,6 +9,8 @@ from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializ
 from accounts.views import token_generation_and_set_in_cookie
 from worker.models import Services
 from worker.serializer import ServiceSerializer
+from .utils import send_email_for_worker_reject
+from django.db.models import Q
 # Create your views here.
 
 
@@ -86,7 +88,7 @@ class Workers(APIView):
         page_size = 5
         offset = (page_no - 1) * page_size
 
-        workers = CustomWorker.objects.all().order_by('date_joined')[offset:offset + page_size]
+        workers = CustomWorker.objects.filter(status='verified').order_by('date_joined')[offset:offset + page_size]
         total_users = CustomWorker.objects.all().count()
         total_pages = (total_users + page_size - 1) // page_size
 
@@ -113,7 +115,7 @@ class Worker(APIView):
 class Requests(APIView):
     permission_classes = [permissions.IsAdminUser]
     def get(self, request):
-        workers = CustomWorker.objects.exclude(status='verified').order_by('date_joined')
+        workers = CustomWorker.objects.exclude(Q(status='verified')|Q(status='rejected')).order_by('date_joined')
         print(workers, 'l')
         serailizer = GetWorkers(workers, many=True)
         return Response(serailizer.data, status=status.HTTP_200_OK)
@@ -122,6 +124,7 @@ class HandleRequest(APIView):
     permission_classes = [permissions.IsAdminUser]
     def post(self, request):
         status = request.data.get('status')
+        reason = request.data.get('reason')
         user = CustomWorker.objects.filter(email=request.data.get('email')).first()
         if user:
             if status in dict(CustomWorker.STATUS_CHOICES):
@@ -129,6 +132,7 @@ class HandleRequest(APIView):
                 if status == 'verified':
                     user.is_active = True
                 elif status == 'rejected':
+                    send_email_for_worker_reject(user.email, reason, f'id={user.id}')
                     user.is_active = False
                 user.save()
                 serailizer = GetWorkers(user)

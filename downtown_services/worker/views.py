@@ -65,6 +65,63 @@ class SignUp(APIView):
         print(serializer, serializer.data)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def put(self, request):
+        print(request.FILES, 'files', request.data)
+        worker_id = request.query_params.get('id')
+        try:
+            worker = CustomWorker.objects.get(id=worker_id)
+        except CustomWorker.DoesNotExist:
+            return Response({"error": "Worker not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        data = request.data
+        if 'services' in request.data and isinstance(request.data['services'], str):
+            try:
+                services = json.loads(data["services"]) if isinstance(data["services"], str) else data["services"]
+                worker.worker_profile.services.set(services)
+            except json.JSONDecodeError:
+                return Response({'services': 'Invalid format for services.'}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                print(e)
+                return Response({'services': 'Invalid data.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        if "aadhaar_no" in data:
+            worker.worker_profile.aadhaar_no = data["aadhaar_no"]
+
+        if "location" in data:
+            worker.worker_profile.location = data["location"]
+
+        if "lat" in data:
+            worker.worker_profile.lat = data["lat"]
+
+        if "lng" in data:
+            worker.worker_profile.lng = data["lng"]
+
+        if "experience" in data:
+            worker.worker_profile.experience = data["experience"]
+
+        if "certificate" in request.FILES:
+            cert_img = request.FILES["certificate"]
+
+            if cert_img:
+                file_extension = os.path.splitext(cert_img.name)[1]
+                current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                unique_filename = f"{current_time_str}{file_extension}"
+                s3_file_path = f"workers/certificate/{unique_filename}"
+                try:
+                    image_url = upload_fileobj_to_s3(cert_img, s3_file_path)
+                    if image_url:
+                        worker.worker_profile.certificate = s3_file_path
+                        print("Image URL:", image_url)
+                    else:
+                        return Response({'error':"File upload to S3 failed"}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    print(e)
+                    return Response({'error':"something went wrong"}, status=status.HTTP_400_BAD_REQUEST)
+        worker.status = 'in_review'
+        worker.worker_profile.save()
+        worker.save()
+        return Response({'success':"Request sent successfully"}, status=status.HTTP_200_OK)
 
 
 class Login(APIView):
@@ -211,7 +268,7 @@ class ServicesManage(APIView):
             return Response(f'service not found on {pk}', status=status.HTTP_404_NOT_FOUND)
 
     def get(self, request):
-        services = Services.objects.filter(worker=request.user)
+        services = Services.objects.filter(worker=request.user, is_deleted=False)
         serializer = ServiceListingSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -234,7 +291,8 @@ class ServicesManage(APIView):
     
     def delete(self, request, pk):
         service = self.get_object(pk)
-        service.delete()
+        service.is_deleted = True
+        service.save()
         return Response(status=status.HTTP_200_OK)
 
 
@@ -260,7 +318,7 @@ class WorkerRequests(APIView):
                 request_obj.save()
                 if request_obj.status == 'accepted':
                     # if Orders.objects.filter(user=request_obj.user, service_provider=request_obj.worker)
-                    order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
+                    order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
                     OrderTracking.objects.create(order=order)
                 return Response({"message": f"Request status updated to {request_status}."}, status=status.HTTP_200_OK)
             else:
@@ -286,14 +344,31 @@ class ChangeLocation(APIView):
         except WorkerProfile.DoesNotExist:
             return Response({'error':'No user profile'}, status=status.HTTP_404_NOT_FOUND)
         
+class OrdersView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        try:
+            filter_key = request.query_params.get('filter_key', 'completed')
+            orders = Orders.objects.filter(service_provider=request.user, status=filter_key)
+            if filter_key == 'completed':
+                orders = Orders.objects.filter(service_provider=request.user, status=filter_key, order_payment__status='paid')
+            elif filter_key == 'working':
+                orders = Orders.objects.filter(Q(service_provider=request.user) & Q(status=filter_key) | Q(order_payment__status='unPaid'))
+            print(orders, 'ordersss')
+            serializer = UserOrderSerializer(orders, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Orders not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
 class AcceptedServices(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) | (Q(status='pending') | Q(status='working') | Q(order_payment__status='unPaid')))
+        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working') | (Q(status='completed') & Q(order_payment__status='unPaid'))))
         accepted_requests = Requests.objects.filter(worker=request.user.worker_profile, status='accepted')
         serializer = UserOrderSerializer(uncompleted_orders, many=True)
-        print('hi')
+        print('hi', uncompleted_orders)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
 class AcceptedService(APIView):

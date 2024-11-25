@@ -69,6 +69,7 @@ class Services(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     price = models.IntegerField()
     is_active = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False)
     
 class Requests(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='request')
@@ -78,6 +79,7 @@ class Requests(models.Model):
     STATUS_CHOICES = [
         ('request_sent', 'Request Sent'),
         ('accepted', 'Accepted'),
+        ('completed', 'Completed'),
         ('rejected', 'Rejected'),
         ('cancelled', 'Cancelled'),
     ]

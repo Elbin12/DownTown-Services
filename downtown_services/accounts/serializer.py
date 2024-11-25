@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges
+from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review
 from admin_auth.models import Categories, SubCategories
 from .utils import create_presigned_url
 
@@ -92,6 +92,11 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = OrderPayment
         fields = ['id', 'order', 'total_amount', 'status', 'created_at', 'updated_at', 'additional_charges']
 
+class ReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Review
+        fields = '__all__'
+
 class UserOrderSerializer(serializers.ModelSerializer):
     from worker.serializer import WorkerDetailSerializer
 
@@ -100,9 +105,10 @@ class UserOrderSerializer(serializers.ModelSerializer):
     worker = serializers.SerializerMethodField(read_only = True)
     service_image = serializers.SerializerMethodField()
     payment_details = serializers.SerializerMethodField()
+    user_review = ReviewSerializer(source='review', many=True, read_only=True)
     class Meta:
         model = Orders
-        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details']
+        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details', 'user_review']
 
     def get_service_image(self, instance):
         image_url = create_presigned_url(str(instance.service_image_url))

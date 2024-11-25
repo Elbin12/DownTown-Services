@@ -161,7 +161,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         service_name = attrs.get('service_name')
         worker = self.context['request'].user
         if self.instance is None:
-            if Services.objects.filter(service_name=service_name, worker=worker).exists():
+            if Services.objects.filter(service_name__icontains=service_name, worker=worker).exists():
                 raise serializers.ValidationError({
                     'status': False,
                     'message': 'A service with this name already exists'
@@ -175,6 +175,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         worker = self.context.get('request').user
         validated_data['worker'] = worker
         print(validated_data, 'validated')
+        validated_data['is_active'] = True
         pic = self.context['request'].FILES.get('pic')
         if pic:
             file_extension = os.path.splitext(pic.name)[1]

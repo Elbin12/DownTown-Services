@@ -36,7 +36,11 @@ urlpatterns = [
    path('cancel-request/', views.CancelRequest.as_view()),
    path('find-order/<int:pk>/', views.FindOrderFromRequest.as_view()),
    path('worker-arrived/', views.WorkerArrived.as_view()),
+   path('orders/', views.OrdersView.as_view()),
    path('order/<int:pk>/', views.OrderView.as_view()),
+   path('create_payment/', views.CreatePayment.as_view()),
+   path('payment-success/<int:pk>/', views.PaymentSuccess.as_view()),
+   path('add-review/', views.AddReview.as_view()),
 ]
 
 

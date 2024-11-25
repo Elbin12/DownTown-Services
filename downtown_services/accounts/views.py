@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser, UserProfile, Orders, OrderTracking
+from .models import CustomUser, UserProfile, Orders, OrderTracking, Review
 
 import random
 from django.conf import settings
@@ -21,14 +21,18 @@ from .tasks import send_mail_task
 from django.db.models import Q
 from .utils import upload_fileobj_to_s3, create_presigned_url, AuthenticateIfJWTProvided, find_distance, find_distance_for_anonymoususer, get_nearby_services, get_nearby_services_for_anonymoususer
 
-import os
+import os, stripe
 from datetime import datetime
 from django.db.models import Count
 import requests
-
+from django.http import HttpResponseRedirect
 from django.contrib.auth.models import AnonymousUser
 
 # Create your views here.
+
+
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 def send_email(request, email, mob=None):
@@ -311,12 +315,12 @@ class ServicesView(APIView):
     def get(self, request):
         try:
             search_key = request.query_params.get('search_key', None)
-            services = Services.objects.filter(is_active=True)
+            services = Services.objects.filter(is_active=True, is_deleted=False)
             filters = Q()
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
 
-            services = Services.objects.filter(filters) if filters else Services.objects.filter(is_active=True)
+            services = Services.objects.filter(filters, is_active=True, is_deleted=False) if filters else Services.objects.filter(is_active=True, is_deleted=False)
             print(request.user, 'user')
             if isinstance(request.user, AnonymousUser):
                 lat = request.session.get('lat')
@@ -341,7 +345,7 @@ class ServicesView(APIView):
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
             print('ser', search_key, request.user)
-            services = services.filter(filters) if filters else Services.objects.filter(is_active=True)
+            services = Services.objects.filter(filters, is_active=True, is_deleted=False) if filters else Services.objects.filter(is_active=True, is_deleted=False)
             selected = request.data.get('selected_sub')
             services_q = Q()
             for key, items in selected.items():
@@ -430,7 +434,7 @@ class CancelRequest(APIView):
             return Response({'error':'Request doesnot exists'}, status=status.HTTP_404_NOT_FOUND)
         
 class ChangeLocation(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny] 
 
     def post(self, request):
         lat = request.data.get('lat')
@@ -460,6 +464,24 @@ class ChangeLocation(APIView):
         except Exception as e:
             print(e, 'e')
             return Response({'error':'An unexcepted error occured.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class OrdersView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            filter_key = request.query_params.get('filter_key', 'completed')
+            orders = Orders.objects.filter(user=request.user, status=filter_key)
+            if filter_key == 'completed':
+                orders = Orders.objects.filter(user=request.user, status=filter_key, order_payment__status='paid')
+            elif filter_key == 'working':
+                orders = Orders.objects.filter(Q(user=request.user) & Q(status=filter_key) | Q(order_payment__status='unPaid'))
+            print(orders, 'ordersss')
+            serializer = UserOrderSerializer(orders, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Orders not found'}, status=status.HTTP_400_BAD_REQUEST)
+
         
 class OrderView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -478,11 +500,10 @@ class FindOrderFromRequest(APIView):
     def get(self, request, pk):
         try:
             request_obj = Requests.objects.get(id=pk)
-            print(request_obj.service.service_name)
-            order_obj = Orders.objects.get(user=request_obj.user, service_provider=request_obj.worker.user, service_name=request_obj.service.service_name)
+            order_obj = Orders.objects.get(request=request_obj)
             serializer = UserOrderSerializer(order_obj)
             return Response(serializer.data, status=status.HTTP_200_OK)
-        except Requests.DoesNotExist:
+        except Orders.DoesNotExist:
             return Response(f'Request not found on {pk}', status=status.HTTP_404_NOT_FOUND)
         except Orders.DoesNotExist:
             return Response(f'Order not found with request id {pk}', status=status.HTTP_404_NOT_FOUND)
@@ -496,16 +517,95 @@ class WorkerArrived(APIView):
         print(order_id, 'idddd')
         try:
             order = Orders.objects.get(id=order_id)
+            order.status = 'working'
             order_tracking = order.status_tracking
             order_tracking.is_worker_arrived = True
             order_tracking.arrival_time = datetime.now()
             order_tracking.work_start_time = datetime.now()
             order_tracking.is_work_started = True
             order_tracking.save()
+            order.save()
             serializer = UserOrderTrackingSerializer(order_tracking)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
         except OrderTracking.DoesNotExist:
             return Response({"error": "Order tracking data not found."}, status=status.HTTP_404_NOT_FOUND)
-    
+
+class CreatePayment(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        print('kkkkllll')
+        try:
+            print(settings.STRIPE_SECRET_KEY, 'kkk')
+            order_id = request.data.get('order_id')
+            order = Orders.objects.get(id=order_id)
+            line_items = []
+            service_image_url = create_presigned_url(str(order.service_image_url))
+            line_items.append({
+                'price_data': {
+                    'currency': 'inr',
+                    'unit_amount': int(order.order_payment.total_amount * 100),
+                    'product_data': {
+                            'name': order.service_name,
+                            'description': (
+                                f"{order.service_description} | "
+                                f"Worker Name: {order.service_provider.worker_profile.first_name} | "
+                                f"Contact: {order.service_provider.mob}"
+                            ),
+                            'images': [service_image_url],
+                        },
+                },
+                'quantity':1,
+                })
+            print(line_items, 'lineee')
+            checkout_session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                mode='payment',
+                line_items=line_items,
+                success_url=f"http://localhost:8000/payment-success/{order.id}/",
+                cancel_url=f"http://localhost:8000/payment-cancel/",
+                metadata={'order_id': order_id},
+            )
+
+            return Response({'id': checkout_session.id}, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error': 'Order not found.'}, status.HTTP_403_FORBIDDEN)
+        except Exception as e:
+            return Response({'error': str(e)}, status.HTTP_403_FORBIDDEN)
+        
+class PaymentSuccess(APIView):
+    permission_classes = []
+
+    def get(self, request, pk):
+        try:
+            print('kkiii')
+            order = Orders.objects.get(id=pk)
+            order.order_payment.status = 'paid'
+            order.order_payment.save()
+            order.save()
+            request_obj = order.request
+            request_obj.status = 'completed'
+            request_obj.save()
+            frontend_url = f"http://localhost:3000/payment/success/{pk}/"
+            return HttpResponseRedirect(frontend_url)
+        except Orders.DoesNotExist:
+            return Response({'error':'order not found'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class AddReview(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        review = request.data.get('review')
+        order_id = request.data.get('order_id')
+        rating = request.data.get('rating')
+        try:
+            order = Orders.objects.get(id=order_id)
+            review = Review.objects.create(order=order, review=review, rating=int(rating))
+            serializer = UserOrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Order not found'}, status=status.HTTP_400_BAD_REQUEST)

@@ -72,6 +72,7 @@ class UserProfile(models.Model):
 class Orders(models.Model):
     user = models.ForeignKey('accounts.CustomUser', on_delete=models.CASCADE, related_name='orders')
     service_provider = models.ForeignKey('worker.CustomWorker', on_delete=models.CASCADE, related_name='serviced_orders')
+    request = models.ForeignKey('worker.Requests', on_delete=models.CASCADE, related_name='service_request')
 
     service_name = models.CharField(max_length=255)
     service_description = models.TextField()
@@ -114,3 +115,13 @@ class Additional_charges(models.Model):
     description = models.TextField()
     price = models.IntegerField()
     image = models.FileField(upload_to = 'users/payment/receipts/', null=True, blank=True)
+
+class Review(models.Model):
+    order = models.ForeignKey(Orders, on_delete=models.CASCADE, related_name='review')
+    review = models.CharField(max_length=200)
+    rating = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Review by {self.user} for {self.order} - Rating: {self.rating}"
