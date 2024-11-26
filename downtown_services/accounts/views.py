@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser, UserProfile, Orders, OrderTracking, Review
+from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions
 
 import random
 from django.conf import settings
@@ -14,7 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer
 from admin_auth.models import Categories, SubCategories
-from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer
+from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer, WorkerDetailSerializer
 from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
@@ -609,3 +609,29 @@ class AddReview(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Order not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
+class update_interaction(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        is_like = request.data.get('is_like')
+        review_id = request.data.get('review_id')
+        try:
+            review = Review.objects.get(id=review_id)
+            interaction, created = Interactions.objects.get_or_create(review=review, user=request.user, defaults={'likes': None})
+            if interaction.is_liked is None:  
+                interaction.is_liked = is_like
+            elif interaction.is_liked == is_like:
+                interaction.is_liked = None
+            else:  
+                interaction.is_liked = is_like
+
+            interaction.save()
+
+            total_likes = Interactions.objects.filter(review=review, is_liked=True).count()
+            total_dislikes = Interactions.objects.filter(review=review, is_liked=False).count()
+            serializer = WorkerDetailSerializer(review.order.service_provider)
+            print(serializer.data, 'lllddd')
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Review.DoesNotExist:
+            return Response({'error':'Review not found'}, status=status.HTTP_404_NOT_FOUND)

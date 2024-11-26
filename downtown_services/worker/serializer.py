@@ -1,12 +1,13 @@
 from rest_framework import serializers
 from .models import CustomWorker, Services, Requests, WorkerProfile
 from django.contrib.auth.hashers import make_password   
-from accounts.serializer import ProfileSerializer
+from accounts.serializer import ProfileSerializer, ReviewSerializer
 import os, json
 from datetime import datetime
 from accounts.utils import upload_fileobj_to_s3, create_presigned_url
 from admin_auth.models import Categories
-
+from accounts.models import Review, Orders
+from django.db.models import Avg
 
 class WorkerRegisterSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True)
@@ -106,12 +107,14 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
     lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
     location = serializers.CharField(source='worker_profile.location', read_only = True)
+    rating = serializers.SerializerMethodField()
+    reviews = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomWorker
         fields = [
             'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating'
         ]
 
     def validate(self, data):
@@ -126,6 +129,19 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
         if image_url:
             return image_url
         return None
+    
+    def get_reviews(self, obj):
+        orders = Orders.objects.filter(service_provider=obj)
+        reviews = Review.objects.filter(order__in=orders)
+        return ReviewSerializer(reviews, many=True).data
+    
+    def get_rating(self, obj):
+        orders = Orders.objects.filter(service_provider=obj)
+        average_rating = (
+            Review.objects.filter(order__in=orders)
+            .aggregate(avg_rating=Avg('rating'))['avg_rating']
+        )
+        return round(average_rating, 1) if average_rating else 0
     
 class RequestsSerializer(serializers.ModelSerializer):
     class Meta:

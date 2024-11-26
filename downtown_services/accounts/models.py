@@ -125,3 +125,10 @@ class Review(models.Model):
 
     def __str__(self):
         return f"Review by {self.user} for {self.order} - Rating: {self.rating}"
+
+class Interactions(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='interactions')
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name='interactions')
+    is_liked = models.BooleanField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

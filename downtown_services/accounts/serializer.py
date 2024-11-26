@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review
+from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review, Interactions
 from admin_auth.models import Categories, SubCategories
 from .utils import create_presigned_url
 
@@ -93,9 +93,25 @@ class PaymentSerializer(serializers.ModelSerializer):
         fields = ['id', 'order', 'total_amount', 'status', 'created_at', 'updated_at', 'additional_charges']
 
 class ReviewSerializer(serializers.ModelSerializer):
+    user = ProfileSerializer(source = 'order.user.user_profile')
+    total_likes = serializers.SerializerMethodField()
+    total_dislikes = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
+
     class Meta:
         model = Review
-        fields = '__all__'
+        fields = ['id', 'review', 'rating', 'user', 'total_likes', 'total_dislikes', 'is_liked']
+
+    def get_total_likes(self, obj):
+        return Interactions.objects.filter(review=obj, is_liked=True).count()
+    
+    def get_total_dislikes(self, obj):
+        return Interactions.objects.filter(review=obj, is_liked=False).count()
+    
+    def get_is_liked(self, obj):
+        interaction = Interactions.objects.get(review=obj, user=obj.order.user)
+        return interaction.is_liked
+
 
 class UserOrderSerializer(serializers.ModelSerializer):
     from worker.serializer import WorkerDetailSerializer

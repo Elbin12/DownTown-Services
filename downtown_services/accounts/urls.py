@@ -41,6 +41,7 @@ urlpatterns = [
    path('create_payment/', views.CreatePayment.as_view()),
    path('payment-success/<int:pk>/', views.PaymentSuccess.as_view()),
    path('add-review/', views.AddReview.as_view()),
+   path('add-interactions/', views.update_interaction.as_view()),
 ]
 
 
