@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review, Interactions
+from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review, Interactions, Wallet, Transaction
 from admin_auth.models import Categories, SubCategories
 from .utils import create_presigned_url
 
@@ -109,8 +109,9 @@ class ReviewSerializer(serializers.ModelSerializer):
         return Interactions.objects.filter(review=obj, is_liked=False).count()
     
     def get_is_liked(self, obj):
-        interaction = Interactions.objects.get(review=obj, user=obj.order.user)
-        return interaction.is_liked
+        request = self.context.get('request')
+        interaction = Interactions.objects.filter(review=obj, user=request.user).first()
+        return interaction.is_liked if interaction else None
 
 
 class UserOrderSerializer(serializers.ModelSerializer):
@@ -134,7 +135,7 @@ class UserOrderSerializer(serializers.ModelSerializer):
     
     def get_worker(self, instance):
         from worker.serializer import WorkerDetailSerializer
-        return WorkerDetailSerializer(instance.service_provider).data
+        return WorkerDetailSerializer(instance.service_provider, context=self.context).data
     
     def get_payment_details(self, instance):
         if hasattr(instance, 'order_payment'):  
@@ -161,4 +162,20 @@ class RequestListingDetails(serializers.ModelSerializer):
     def get_service(self, instance):
         from worker.serializer import ServiceListingSerializer
         return ServiceListingSerializer(instance.service).data
+    
+class TransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields = '__all__'
 
+
+class WalletSerializer(serializers.ModelSerializer):
+    transactions = serializers.SerializerMethodField()
+    class Meta:
+        model = Wallet
+        fields = ['balance', 'transactions']
+
+
+    def get_transactions(self, obj):
+        transactions = Transaction.objects.filter(wallet=obj).order_by('-created_at')
+        return TransactionSerializer(transactions, many=True).data

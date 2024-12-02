@@ -133,7 +133,7 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     def get_reviews(self, obj):
         orders = Orders.objects.filter(service_provider=obj)
         reviews = Review.objects.filter(order__in=orders)
-        return ReviewSerializer(reviews, many=True).data
+        return ReviewSerializer(reviews, many=True,context=self.context).data
     
     def get_rating(self, obj):
         orders = Orders.objects.filter(service_provider=obj)

@@ -354,7 +354,7 @@ class OrdersView(APIView):
             if filter_key == 'completed':
                 orders = Orders.objects.filter(service_provider=request.user, status=filter_key, order_payment__status='paid')
             elif filter_key == 'working':
-                orders = Orders.objects.filter(Q(service_provider=request.user) & Q(status=filter_key) | Q(order_payment__status='unPaid'))
+                orders = Orders.objects.filter(Q(service_provider=request.user) & Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid'))
             print(orders, 'ordersss')
             serializer = UserOrderSerializer(orders, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)

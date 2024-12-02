@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions
+from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions, Wallet, Transaction
 
 import random
 from django.conf import settings
@@ -12,7 +12,7 @@ from django.conf import settings
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer
+from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer, WalletSerializer
 from admin_auth.models import Categories, SubCategories
 from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer, WorkerDetailSerializer
 from worker.models import Services, CustomWorker, WorkerProfile, Requests
@@ -471,13 +471,14 @@ class OrdersView(APIView):
     def get(self, request):
         try:
             filter_key = request.query_params.get('filter_key', 'completed')
+            print(filter_key, 'keeeee')
             orders = Orders.objects.filter(user=request.user, status=filter_key)
             if filter_key == 'completed':
                 orders = Orders.objects.filter(user=request.user, status=filter_key, order_payment__status='paid')
             elif filter_key == 'working':
-                orders = Orders.objects.filter(Q(user=request.user) & Q(status=filter_key) | Q(order_payment__status='unPaid'))
+                orders = Orders.objects.filter(Q(user=request.user) & Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid'))
             print(orders, 'ordersss')
-            serializer = UserOrderSerializer(orders, many=True)
+            serializer = UserOrderSerializer(orders, many=True, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Orders not found'}, status=status.HTTP_400_BAD_REQUEST)
@@ -489,7 +490,7 @@ class OrderView(APIView):
     def get(self, request, pk):
         try:
             order = Orders.objects.get(id=pk)
-            serializer = UserOrderSerializer(order)
+            serializer = UserOrderSerializer(order, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Requests.DoesNotExist:
             return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
@@ -500,8 +501,8 @@ class FindOrderFromRequest(APIView):
     def get(self, request, pk):
         try:
             request_obj = Requests.objects.get(id=pk)
-            order_obj = Orders.objects.get(request=request_obj)
-            serializer = UserOrderSerializer(order_obj)
+            order_obj = Orders.objects.filter(request=request_obj).order_by('-created_at').first()
+            serializer = UserOrderSerializer(order_obj, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response(f'Request not found on {pk}', status=status.HTTP_404_NOT_FOUND)
@@ -605,6 +606,7 @@ class AddReview(APIView):
         try:
             order = Orders.objects.get(id=order_id)
             review = Review.objects.create(order=order, review=review, rating=int(rating))
+            Interactions.objects.create(user=request.user, review = review)
             serializer = UserOrderSerializer(order)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
@@ -616,9 +618,10 @@ class update_interaction(APIView):
     def post(self, request):
         is_like = request.data.get('is_like')
         review_id = request.data.get('review_id')
+        print(request.user, 'iiii')
         try:
             review = Review.objects.get(id=review_id)
-            interaction, created = Interactions.objects.get_or_create(review=review, user=request.user, defaults={'likes': None})
+            interaction, created = Interactions.objects.get_or_create(review=review, user=request.user, defaults={'is_liked': None})
             if interaction.is_liked is None:  
                 interaction.is_liked = is_like
             elif interaction.is_liked == is_like:
@@ -627,11 +630,69 @@ class update_interaction(APIView):
                 interaction.is_liked = is_like
 
             interaction.save()
-
-            total_likes = Interactions.objects.filter(review=review, is_liked=True).count()
-            total_dislikes = Interactions.objects.filter(review=review, is_liked=False).count()
-            serializer = WorkerDetailSerializer(review.order.service_provider)
+            serializer = WorkerDetailSerializer(review.order.service_provider, context={'request': request})
             print(serializer.data, 'lllddd')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Review.DoesNotExist:
             return Response({'error':'Review not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+class   WalletView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            wallet, created = Wallet.objects.get_or_create(user=request.user)
+            serializer = WalletSerializer(wallet)
+            print(serializer.data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Wallet.DoesNotExist:
+            return Response({'error':'Wallet not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(e, 'ee')
+            return Response({'error':'Something went wrong.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        amount = int(request.data.get("amount"))*100
+
+        try:
+            payment_intent = stripe.PaymentIntent.create(
+                amount=amount,
+                currency="inr",
+                payment_method_types=["card"],
+            )
+
+            wallet, created = Wallet.objects.get_or_create(user=request.user)
+            transaction = Transaction.objects.create(wallet=wallet, transaction_type = 'credit', amount=amount/100)
+            return Response({"client_secret": payment_intent.client_secret, 'transaction_id':transaction.id}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(e, 'ee')
+            return Response({'error':'Something went wrong.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)  
+
+
+class CapturePayment(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        transaction_id = request.data.get("transaction_id")
+        payment_intent_id = request.data.get("payment_intent_id")
+        try:
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            trans = Transaction.objects.get(id=transaction_id)
+
+            if payment_intent['status'] == 'succeeded':
+                if trans.status != 'completed':
+                    trans.status = 'completed'
+            else:
+                trans.status = 'failed'
+            trans.save()
+            serailizer = WalletSerializer(Wallet.objects.get(user=request.user))
+            return Response(serailizer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(e, 'eee')
+            try:
+                trans = Transaction.objects.get(id=transaction_id)
+                trans.status = 'failed'
+                trans.save()
+            except Transaction.DoesNotExist:
+                return Response({'error':'Transaction not found'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error':'Something went wrong'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
