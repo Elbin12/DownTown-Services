@@ -176,3 +176,18 @@ class Transaction(models.Model):
                 self.wallet.add_balance(self.amount)
             elif self.transaction_type == 'debit':
                 self.wallet.deduct_balance(self.amount)
+
+
+
+class ChatMessage(models.Model):
+    sender_type_choices = (
+        ('user', 'User'),
+        ('worker', 'Worker'),
+    )
+    sender_id = models.IntegerField()
+    sender_type = models.CharField(max_length=10, choices=sender_type_choices)
+    recipient_id = models.IntegerField()
+    recipient_type = models.CharField(max_length=10, choices=sender_type_choices)
+    message = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+    # is_read = models.BooleanField(default=False)

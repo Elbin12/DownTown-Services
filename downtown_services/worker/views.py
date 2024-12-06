@@ -3,8 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser, OrderPayment, Additional_charges
-from .models import CustomWorker, WorkerProfile, Services, Requests
-from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails
+from .models import CustomWorker, WorkerProfile, Services, Requests, Wallet, Transaction
+from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails, ChatMessageSerializer, WalletSerializer
 
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -16,14 +16,17 @@ from admin_auth.models import Categories
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from accounts.utils import upload_fileobj_to_s3
-from accounts.models import Orders, OrderTracking
-from accounts.serializer import UserOrderSerializer
+from accounts.models import Orders, OrderTracking, ChatMessage
+from accounts.serializer import OrdersListingSerializer
 
-import os, json
+import os, json, stripe
 from datetime import datetime
 
-from django.db.models import Q
+from django.db.models import Q, OuterRef, Subquery
 # Create your views here.
+
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 class CheckingCredentials(APIView):
@@ -160,7 +163,7 @@ class Login(APIView):
         }
 
         if worker_profile:
-            serializer = WorkerDetailSerializer(worker)
+            serializer = WorkerLoginSerializer(worker)
             content.update(serializer.data)
 
         response = Response(content, status=status.HTTP_200_OK)
@@ -356,7 +359,7 @@ class OrdersView(APIView):
             elif filter_key == 'working':
                 orders = Orders.objects.filter(Q(service_provider=request.user) & Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid'))
             print(orders, 'ordersss')
-            serializer = UserOrderSerializer(orders, many=True)
+            serializer = OrdersListingSerializer(orders, many=True, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Orders not found'}, status=status.HTTP_400_BAD_REQUEST)
@@ -365,9 +368,10 @@ class AcceptedServices(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
+        print(request.user, 'user')
         uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working') | (Q(status='completed') & Q(order_payment__status='unPaid'))))
         accepted_requests = Requests.objects.filter(worker=request.user.worker_profile, status='accepted')
-        serializer = UserOrderSerializer(uncompleted_orders, many=True)
+        serializer = OrdersListingSerializer(uncompleted_orders, many=True, context={'request':request})
         print('hi', uncompleted_orders)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -377,7 +381,7 @@ class AcceptedService(APIView):
     def get(self, request, pk):
         try:
             order = Orders.objects.get(id=pk)
-            serializer = UserOrderSerializer(order)
+            serializer = OrdersListingSerializer(order, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
@@ -394,7 +398,7 @@ class WorkCompleted(APIView):
             order.status = 'completed'
             order_tracking.save()
             order.save()
-            serializer = UserOrderSerializer(order)
+            serializer = OrdersListingSerializer(order)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -449,3 +453,104 @@ class AddPayment(APIView):
             return Response(status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class ChatHistoryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id, worker_id):
+        ids = sorted([user_id, worker_id])
+        messages = ChatMessage.objects.filter(
+            sender_id__in=ids,
+            recipient_id__in=ids
+        ).order_by('timestamp')
+        serializer = ChatMessageSerializer(messages, many=True, context={'request':request})
+        return Response(serializer.data)
+    
+
+class Chats(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Subquery to find the last message for each conversation involving the user
+        last_message_subquery = ChatMessage.objects.filter(
+            Q(sender_id=OuterRef('sender_id'), recipient_id=OuterRef('recipient_id')) |
+            Q(sender_id=OuterRef('recipient_id'), recipient_id=OuterRef('sender_id'))
+        ).filter(
+            Q(sender_id=user.id) | Q(recipient_id=user.id)  # Restrict to user's conversations
+        ).order_by('-timestamp').values('id')[:1]
+
+        # Fetch the latest messages in user's conversations
+        last_messages = ChatMessage.objects.filter(
+            Q(sender_id=user.id) | Q(recipient_id=user.id),  # Include only user's messages
+            id__in=Subquery(last_message_subquery)
+        ).distinct().order_by('-timestamp')
+
+        serializer = ChatMessageSerializer(last_messages, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+    
+
+class   WalletView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            print(request.user, 'uuu')
+            wallet, created = Wallet.objects.get_or_create(worker=request.user)
+            serializer = WalletSerializer(wallet)
+            print(serializer.data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Wallet.DoesNotExist:
+            return Response({'error':'Wallet not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(e, 'ee')
+            return Response({'error':'Something went wrong.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        amount = int(request.data.get("amount"))*100
+
+        try:
+            payment_intent = stripe.PaymentIntent.create(
+                amount=amount,
+                currency="inr",
+                payment_method_types=["card"],
+            )
+
+            wallet, created = Wallet.objects.get_or_create(worker=request.user)
+            transaction = Transaction.objects.create(wallet=wallet, transaction_type = 'credit', amount=amount/100)
+            return Response({"client_secret": payment_intent.client_secret, 'transaction_id':transaction.id}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(e, 'ee')
+            return Response({'error':'Something went wrong.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class CapturePayment(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        transaction_id = request.data.get("transaction_id")
+        payment_intent_id = request.data.get("payment_intent_id")
+        try:
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            trans = Transaction.objects.get(id=transaction_id)
+
+            if payment_intent['status'] == 'succeeded':
+                if trans.status != 'completed':
+                    trans.status = 'completed'
+            else:
+                trans.status = 'failed'
+            trans.save()
+            serailizer = WalletSerializer(Wallet.objects.get(worker=request.user))
+            return Response(serailizer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(e, 'eee')
+            try:
+                trans = Transaction.objects.get(id=transaction_id)
+                trans.status = 'failed'
+                trans.save()
+            except Transaction.DoesNotExist:
+                return Response({'error':'Transaction not found'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error':'Something went wrong'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

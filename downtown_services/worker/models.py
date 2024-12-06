@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
 from accounts.models import CustomUserManager, CustomUser
 from admin_auth.models import Categories, SubCategories
+import uuid
 
 # Create your models here.
 
@@ -86,4 +87,47 @@ class Requests(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='request_sent')
     created_at = models.DateTimeField(default=timezone.now)
     is_completed = models.BooleanField(default=False)
+
+class Wallet(models.Model):
+    wallet_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    worker = models.ForeignKey(CustomWorker, on_delete=models.CASCADE, related_name='wallet')
+    balance = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def add_balance(self, amount):
+        self.balance += amount
+        self.save()
+
+    def deduct_balance(self, amount):
+        if amount <= self.balance:
+            self.balance -= amount
+            self.save()
+        else:
+            raise ValueError("Insufficient balance")
+
+class Transaction(models.Model):
+    TRANSACTION_TYPES = [
+        ('credit', 'Credit'),
+        ('debit', 'Debit'),
+    ]
+
+    transaction_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
+    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(
+        max_length=20, 
+        choices=[('pending', 'Pending'), ('completed', 'Completed'), ('failed', 'Failed')], 
+        default='pending'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.status == 'completed':
+            if self.transaction_type == 'credit':
+                self.wallet.add_balance(self.amount)
+            elif self.transaction_type == 'debit':
+                self.wallet.deduct_balance(self.amount)
     

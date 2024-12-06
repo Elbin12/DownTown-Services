@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.core.mail import send_mail
 
-from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions, Wallet, Transaction
+from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions, Wallet, Transaction, ChatMessage
 
 import random
 from django.conf import settings
@@ -12,18 +12,18 @@ from django.conf import settings
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer, WalletSerializer
+from .serializer import ProfileSerializer, UserGetSerializer,CategoriesAndSubCategories, CustomUserSerializer, UserOrderSerializer, RequestListingDetails, UserOrderTrackingSerializer, WalletSerializer, ChatMessageSerializer
 from admin_auth.models import Categories, SubCategories
-from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer, WorkerDetailSerializer
+from worker.serializer import RequestsSerializer, ServiceListingSerializer, ServiceListingDetailSerializer, WorkerDetailSerializerForUser
 from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
-from django.db.models import Q
+from django.db.models import Q, Max
 from .utils import upload_fileobj_to_s3, create_presigned_url, AuthenticateIfJWTProvided, find_distance, find_distance_for_anonymoususer, get_nearby_services, get_nearby_services_for_anonymoususer
 
 import os, stripe
 from datetime import datetime
-from django.db.models import Count
+from django.db.models import Count, OuterRef, Subquery
 import requests
 from django.http import HttpResponseRedirect
 from django.contrib.auth.models import AnonymousUser
@@ -476,7 +476,7 @@ class OrdersView(APIView):
             if filter_key == 'completed':
                 orders = Orders.objects.filter(user=request.user, status=filter_key, order_payment__status='paid')
             elif filter_key == 'working':
-                orders = Orders.objects.filter(Q(user=request.user) & Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid'))
+                orders = Orders.objects.filter(Q(user=request.user) & (Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid')))
             print(orders, 'ordersss')
             serializer = UserOrderSerializer(orders, many=True, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -630,7 +630,7 @@ class update_interaction(APIView):
                 interaction.is_liked = is_like
 
             interaction.save()
-            serializer = WorkerDetailSerializer(review.order.service_provider, context={'request': request})
+            serializer = WorkerDetailSerializerForUser(review.order.service_provider, context={'request': request})
             print(serializer.data, 'lllddd')
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Review.DoesNotExist:
@@ -696,3 +696,39 @@ class CapturePayment(APIView):
             except Transaction.DoesNotExist:
                 return Response({'error':'Transaction not found'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             return Response({'error':'Something went wrong'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class ChatHistoryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id, worker_id):
+        ids = sorted([user_id, worker_id])
+        messages = ChatMessage.objects.filter(
+            sender_id__in=ids,
+            recipient_id__in=ids
+        ).order_by('timestamp')
+        serializer = ChatMessageSerializer(messages, many=True, context={'request':request})
+        return Response(serializer.data)
+    
+
+class Chats(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Subquery to find the last message for each conversation involving the user
+        last_message_subquery = ChatMessage.objects.filter(
+            Q(sender_id=OuterRef('sender_id'), recipient_id=OuterRef('recipient_id')) |
+            Q(sender_id=OuterRef('recipient_id'), recipient_id=OuterRef('sender_id'))
+        ).filter(
+            Q(sender_id=user.id) | Q(recipient_id=user.id)  # Restrict to user's conversations
+        ).order_by('-timestamp').values('id')[:1]
+
+        # Fetch the latest messages in user's conversations
+        last_messages = ChatMessage.objects.filter(
+            Q(sender_id=user.id) | Q(recipient_id=user.id),  # Include only user's messages
+            id__in=Subquery(last_message_subquery)
+        ).distinct().order_by('-timestamp')
+
+        serializer = ChatMessageSerializer(last_messages, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)

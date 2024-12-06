@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'accounts',
     'admin_auth',
     'worker',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -226,3 +227,26 @@ DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
 
 STRIPE_SECRET_KEY  = os.getenv('STRIPE_SECRET_KEY')
+
+
+ASGI_APPLICATION = 'downtown_services.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [('localhost', 6379)],
+            'prefix': 'channels',
+        },
+    },
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}

@@ -1,9 +1,9 @@
 from rest_framework import serializers
-from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review, Interactions, Wallet, Transaction
+from . models import CustomUser, UserProfile, Orders, OrderTracking, OrderPayment, Additional_charges, Review, Interactions, Wallet, Transaction, ChatMessage
 from admin_auth.models import Categories, SubCategories
 from .utils import create_presigned_url
 
-from worker.models import Requests
+from worker.models import Requests, CustomWorker
 
 
 
@@ -13,11 +13,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ProfileSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='user.id', read_only=True)
     mob = serializers.CharField(source='user.mob')
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = UserProfile
-        fields = ['first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'mob']
+        fields = ['id','first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'mob']
     
     def validate(self, data):
         request = self.context.get('request')
@@ -37,6 +38,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     
     
 class UserGetSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='user.id')
     email = serializers.EmailField(source='user.email')
     mob = serializers.CharField(source='user.mob')
     is_Active = serializers.BooleanField(source='user.is_active')
@@ -47,7 +49,7 @@ class UserGetSerializer(serializers.ModelSerializer):
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = UserProfile
-        fields = ['email', 'mob', 'first_name', 'last_name', 'dob','lat', 'lng', 'location', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
+        fields = ['id', 'email', 'mob', 'first_name', 'last_name', 'dob','lat', 'lng', 'location', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
     
     def get_profile_pic(self, obj):
         image_url = create_presigned_url(str(obj.profile_pic))
@@ -112,6 +114,35 @@ class ReviewSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         interaction = Interactions.objects.filter(review=obj, user=request.user).first()
         return interaction.is_liked if interaction else None
+    
+class OrdersListingSerializer(serializers.ModelSerializer):
+    from worker.serializer import WorkerDetailSerializer
+
+    user = UserGetSerializer(source='user.user_profile', read_only = True)
+    order_tracking = UserOrderTrackingSerializer(source='status_tracking',read_only = True)
+    service_image = serializers.SerializerMethodField()
+    payment_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Orders
+        fields = ['id', 'user', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details']
+
+    def get_service_image(self, instance):
+        image_url = create_presigned_url(str(instance.service_image_url))
+        if image_url:
+            return image_url
+        return None
+    
+    def get_payment_details(self, instance):
+        if hasattr(instance, 'order_payment'):  
+            payment = instance.order_payment  
+            payment_data = PaymentSerializer(payment).data  
+            if hasattr(payment, 'additional_charges'):
+                additional_charges = payment.additional_charges.all()  
+                additional_charges_data = AdditionalChargesSerializer(additional_charges, many=True).data
+                payment_data['additional_charges'] = additional_charges_data
+            return payment_data
+        return None
 
 
 class UserOrderSerializer(serializers.ModelSerializer):
@@ -179,3 +210,20 @@ class WalletSerializer(serializers.ModelSerializer):
     def get_transactions(self, obj):
         transactions = Transaction.objects.filter(wallet=obj).order_by('-created_at')
         return TransactionSerializer(transactions, many=True).data
+    
+class ChatMessageSerializer(serializers.ModelSerializer):
+    worker = serializers.SerializerMethodField()
+    class Meta:
+        model = ChatMessage
+        fields = ['id', 'sender_id', 'sender_type', 'recipient_id', 'recipient_type', 'message', 'timestamp', 'worker']
+
+    def get_worker(self, obj):
+        from worker.serializer import WorkerDetailSerializer
+        if obj.sender_type == 'worker':
+            print(obj.sender_type, obj.recipient_id, obj.sender_id)
+            worker = CustomWorker.objects.get(id=obj.sender_id)
+        elif obj.recipient_type == 'worker':
+            worker = CustomWorker.objects.get(id=obj.recipient_id)
+        return WorkerDetailSerializer(worker, context=self.context).data
+    
+

@@ -1,12 +1,12 @@
 from rest_framework import serializers
-from .models import CustomWorker, Services, Requests, WorkerProfile
+from .models import CustomWorker, Services, Requests, WorkerProfile, Wallet, Transaction
 from django.contrib.auth.hashers import make_password   
 from accounts.serializer import ProfileSerializer, ReviewSerializer
 import os, json
 from datetime import datetime
 from accounts.utils import upload_fileobj_to_s3, create_presigned_url
 from admin_auth.models import Categories
-from accounts.models import Review, Orders
+from accounts.models import Review, Orders, ChatMessage, CustomUser
 from django.db.models import Avg
 
 class WorkerRegisterSerializer(serializers.ModelSerializer):
@@ -90,12 +90,33 @@ class WorkerRegisterSerializer(serializers.ModelSerializer):
         return worker
     
 class WorkerLoginSerializer(serializers.ModelSerializer):
+    worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
+    first_name = serializers.CharField(source='worker_profile.first_name')
+    last_name = serializers.CharField(source='worker_profile.last_name',required=False, allow_null=True)
+    dob = serializers.DateField(source='worker_profile.dob', required=False, allow_null=True)
+    gender = serializers.CharField(source='worker_profile.gender', required=False, allow_null=True)
+    profile_pic = serializers.SerializerMethodField()
+    email = serializers.EmailField(required=False)
+    mob = serializers.CharField()
+    isWorker = serializers.BooleanField(source='is_staff')
+    lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
+    lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
+    location = serializers.CharField(source='worker_profile.location', read_only = True)
     class Meta:
         model = CustomWorker
-        fields = ['email', 'password']
+        fields = fields = ['worker_profile_id',
+            'id', 'email', 'mob', 'is_active', 'isWorker', 'date_joined',
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location'
+        ]
+    
+    def get_profile_pic(self, obj):
+        image_url = create_presigned_url(str(obj.worker_profile.profile_pic))
+        if image_url:
+            return image_url
+        return None
 
-class WorkerDetailSerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(source='worker_profile.id', read_only=True)
+class WorkerDetailSerializerForUser(serializers.ModelSerializer):
+    worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
     first_name = serializers.CharField(source='worker_profile.first_name')
     last_name = serializers.CharField(source='worker_profile.last_name',required=False, allow_null=True)
     dob = serializers.DateField(source='worker_profile.dob', required=False, allow_null=True)
@@ -113,7 +134,7 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomWorker
         fields = [
-            'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
+            'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
             'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating'
         ]
 
@@ -142,6 +163,42 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
             .aggregate(avg_rating=Avg('rating'))['avg_rating']
         )
         return round(average_rating, 1) if average_rating else 0
+    
+
+
+class WorkerDetailSerializer(serializers.ModelSerializer):
+    worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
+    first_name = serializers.CharField(source='worker_profile.first_name')
+    last_name = serializers.CharField(source='worker_profile.last_name',required=False, allow_null=True)
+    dob = serializers.DateField(source='worker_profile.dob', required=False, allow_null=True)
+    gender = serializers.CharField(source='worker_profile.gender', required=False, allow_null=True)
+    profile_pic = serializers.SerializerMethodField()
+    email = serializers.EmailField(required=False)
+    mob = serializers.CharField()
+    isWorker = serializers.BooleanField(source='is_staff')
+    lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
+    lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
+    location = serializers.CharField(source='worker_profile.location', read_only = True)
+
+    class Meta:
+        model = CustomWorker
+        fields = [
+            'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location',
+        ]
+
+    def validate(self, data):
+        request = self.context.get('request')
+        print(request, request.user, 'll')
+        if CustomWorker.objects.filter(mob=data.get('mob')).exclude(id=request.user.id).exists():
+            raise serializers.ValidationError({'mob':'worker with this mobile number already exists.'})
+        return data
+    
+    def get_profile_pic(self, obj):
+        image_url = create_presigned_url(str(obj.worker_profile.profile_pic))
+        if image_url:
+            return image_url
+        return None
     
 class RequestsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -258,3 +315,36 @@ class RequestListingDetails(serializers.ModelSerializer):
     class Meta:
         model = Requests
         fields = [ 'id', 'user', 'service', 'description', 'status']
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    user = serializers.SerializerMethodField()
+    class Meta:
+        model = ChatMessage
+        fields = ['id', 'sender_id', 'sender_type', 'recipient_id', 'recipient_type', 'message', 'timestamp', 'user']
+
+    def get_user(self, obj):
+        if obj.sender_type == 'user':
+            print(obj.sender_type, obj.recipient_id, obj.sender_id)
+            user = CustomUser.objects.get(id=obj.sender_id)
+        elif obj.recipient_type == 'user':
+            user = CustomUser.objects.get(id=obj.recipient_id)
+        return ProfileSerializer(user.user_profile).data
+    
+
+class TransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+
+
+class WalletSerializer(serializers.ModelSerializer):
+    transactions = serializers.SerializerMethodField()
+    class Meta:
+        model = Wallet
+        fields = ['balance', 'transactions']
+
+
+    def get_transactions(self, obj):
+        transactions = Transaction.objects.filter(wallet=obj).order_by('-created_at')
+        return TransactionSerializer(transactions, many=True).data
