@@ -4,6 +4,9 @@ from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from datetime import datetime
 from accounts.utils import create_presigned_url
+from .utils import RecentChats
+
+
 
 def get_custom_user_model():
     from accounts.models import CustomUser
@@ -12,6 +15,8 @@ def get_custom_user_model():
 def get_custom_worker_model():
     from worker.models import CustomWorker
     return CustomWorker
+
+
 
 class NotificationConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -22,28 +27,16 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             self.channel_name
         )
-        
-        await self.accept()
 
+        await self.accept()
+        
         notifications = await sync_to_async(self.get_pending_notifications)()
         for notification in notifications:
-            if isinstance(notification['sender']['profile_pic'], str):
-                profile_pic = notification['sender']['profile_pic']
-            else:
-                profile_pic = notification['sender']['profile_pic'].url
-
-            print(profile_pic, 'profile_pic', notification['sender']['profile_pic'])
-
             await self.send(text_data=json.dumps({
                 "type": "notification",
-                "notification": {
-                    **notification,
-                    "sender": {
-                        **notification['sender'],
-                        'profile_pic': create_presigned_url(profile_pic)
-                    }
-                },
+                "notification": notification
             }))
+
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
@@ -54,33 +47,35 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
         notification = text_data_json['notification']
+        notification_type = text_data['notification_type']
 
         await self.channel_layer.group_send(
             self.room_group_name,
             {
                 'type': 'send_notification',
-                'notification': notification
+                'notification': notification,
+                'notification_type':notification_type
             }
         )
 
-    async def send_notification(self, event):
-        notification = event["notification"]
-
-        if notification.get("sender", {}).get("profile_pic"):
-            profile_pic_url = str(notification["sender"]["profile_pic"])
-            print(f"Profile Pic URL: {profile_pic_url}")
-            notification["sender"]["profile_pic"] = create_presigned_url(profile_pic_url)
-            
-        await self.send(text_data=json.dumps({
-            "type": "notification",
-            "notification": notification
-        }))
-    
     def get_pending_notifications(self):
         """Retrieve pending notifications from Redis."""
         notifications = cache.get(f"notifications_{self.user_id}", [])
+        for notification in notifications:
+            if notification.get("sender", {}).get("profile_pic"):
+                profile_pic_url = str(notification["sender"]["profile_pic"])
+                print(f"Profile Pic URL: {profile_pic_url}")
+                notification["sender"]["profile_pic"] = create_presigned_url(profile_pic_url)
         print(notifications, 'notifications')
         return notifications
+    
+    async def send_notification(self, event):
+        notification = event["notification"] 
+        notification_type = event["notification_type"]   
+        await self.send(text_data=json.dumps({
+            "type": notification_type,
+            "notification": notification,
+        }))
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -89,44 +84,33 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.worker_id = self.scope['url_route']['kwargs']['worker_id']
 
         self.notification_user_group_name = f"notification_{self.user_id}"
-        await self.channel_layer.group_add(
-            self.notification_user_group_name,
-            self.channel_name
-        )
-
         self.notification_worker_group_name = f"notification_{self.worker_id}"
-        await self.channel_layer.group_add(
-            self.notification_worker_group_name,
-            self.channel_name
-        )
-
         self.room_group_name = f"chat_user_{self.user_id}_worker_{self.worker_id}"
+
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
-        
+
         await self.accept()
 
-
-        print(self.role, 'role')
-        if self.role == 'user':
-            notification_key = f"notifications_{self.user_id}"
-        elif self.role == 'worker':
-            notification_key = f"notifications_{self.worker_id}"
-        else:
-            notification_key = None
-
+        notification_key = f"notifications_{self.user_id}" if self.role == 'user' else f"notifications_{self.worker_id}"
         if notification_key:
-            print(notification_key, 'notificatation_key')
             notifications = cache.get(notification_key, [])
             non_chat_notifications = [
                 notification for notification in notifications if notification.get("type") != "chat"
             ]
 
-            print(non_chat_notifications, 'non_chat_notifications')
-
             cache.set(notification_key, non_chat_notifications, timeout=3600)
+
+        await self.channel_layer.group_send(
+            self.notification_user_group_name if self.role == 'user' else self.notification_worker_group_name,
+            {
+                'type': 'send_notification',
+                "notification": non_chat_notifications,
+                'notification_type': 'update_notifications'
+            }
+        )
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
@@ -151,7 +135,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             recipient_type=recipient_type,
             message=message
         )
-        
+
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -160,13 +144,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'sender_id': sender_id,
                 'recipient_id': recipient_id,
                 'sender_type': sender_type,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         )
 
         recipient_group_name = (
             self.notification_worker_group_name if recipient_type == 'worker' 
             else self.notification_user_group_name)
-
+        
         if sender_type == 'user':
             model = get_custom_user_model()
             sender = await sync_to_async(model.objects.get)(id=sender_id)
@@ -195,33 +180,43 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 },
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
-        
+
         await sync_to_async(self.store_notification_in_redis)(
             recipient_id,
             notification_data
         )
+
+        notification_data['sender']['profile_pic'] = create_presigned_url(notification_data['sender']['profile_pic'])
 
         await self.channel_layer.group_send(
             recipient_group_name,
             {
                 'type': 'send_notification',
                 "notification": notification_data,
+                'notification_type': 'notification',
             }
         )
 
-    async def send_notification(self, event):
-        notification = event["notification"]
-        await self.send(text_data=json.dumps({
-                "type": "notification",
-                "notification": {
-                    **notification,
-                    "sender": {
-                        **notification['sender'],
-                        'profile_pic': create_presigned_url(notification['sender']['profile_pic'])
-                    }
-                },
-            }))
-    
+        sender_chats = await sync_to_async(RecentChats)(sender_id, sender_type)
+        await self.channel_layer.group_send(
+            f'notification_{sender_id}',
+            {
+                'type': 'send_notification',
+                "notification": sender_chats,
+                'notification_type': 'recentchats',
+            }
+        )
+
+        recipient_chats = await sync_to_async(RecentChats)(recipient_id, recipient_type)
+        await self.channel_layer.group_send(
+            f'notification_{recipient_id}',
+            {
+                'type': 'send_notification',
+                "notification": recipient_chats,
+                'notification_type': 'recentchats',
+            }
+        )
+
     async def chat_message(self, event):
         await self.send(text_data=json.dumps({
             'type':'chat',
@@ -229,6 +224,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'sender_id': event['sender_id'],
             'recipient_id': event['recipient_id'],
             'sender_type': event['sender_type'],
+            'timestamp': event['timestamp'],
         }))
 
     def store_notification_in_redis(self, recipient_id, notification_data):

@@ -450,7 +450,8 @@ class AddPayment(APIView):
                             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             payment.total_amount = total_amount
             payment.save()
-            return Response(status=status.HTTP_200_OK)
+            serializer = OrdersListingSerializer(order, context={'request':request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -463,7 +464,8 @@ class ChatHistoryView(APIView):
         messages = ChatMessage.objects.filter(
             sender_id__in=ids,
             recipient_id__in=ids
-        ).order_by('timestamp')
+        ).order_by('-timestamp')[:20]
+        messages = messages[::-1]
         serializer = ChatMessageSerializer(messages, many=True, context={'request':request})
         return Response(serializer.data)
     
@@ -494,7 +496,7 @@ class Chats(APIView):
 
     
 
-class   WalletView(APIView):
+class WalletView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):

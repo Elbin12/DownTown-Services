@@ -224,6 +224,6 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             worker = CustomWorker.objects.get(id=obj.sender_id)
         elif obj.recipient_type == 'worker':
             worker = CustomWorker.objects.get(id=obj.recipient_id)
-        return WorkerDetailSerializer(worker, context=self.context).data
+        return WorkerDetailSerializer(worker).data
     
 
