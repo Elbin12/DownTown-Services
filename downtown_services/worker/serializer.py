@@ -282,7 +282,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         return None
 
 class ServiceListingDetailSerializer(serializers.ModelSerializer):
-    workerProfile = WorkerDetailSerializer(source='worker', read_only=True)
+    workerProfile = WorkerDetailSerializerForUser(source='worker', read_only=True)
     category_name = serializers.CharField(source='category.category_name', read_only=True)
     subcategory_name = serializers.CharField(source='subcategory.subcategory_name', read_only=True) 
     pic = serializers.SerializerMethodField()

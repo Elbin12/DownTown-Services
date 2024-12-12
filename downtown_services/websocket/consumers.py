@@ -30,10 +30,17 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 
         await self.accept()
         
-        notifications = await sync_to_async(self.get_pending_notifications)()
-        for notification in notifications:
+        non_chat_notifications = await sync_to_async(self.get_pending_notifications)()
+        for notification in non_chat_notifications:
             await self.send(text_data=json.dumps({
                 "type": "notification",
+                "notification": notification
+            }))
+
+        chat_notifications = await sync_to_async(self.get_pending_chat_notifications)()
+        for notification in chat_notifications:
+            await self.send(text_data=json.dumps({
+                "type": "chat_message",
                 "notification": notification
             }))
 
@@ -61,13 +68,20 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     def get_pending_notifications(self):
         """Retrieve pending notifications from Redis."""
         notifications = cache.get(f"notifications_{self.user_id}", [])
-        for notification in notifications:
+        non_chat_notifications = [notification for notification in notifications if notification.get("type") != "chat"]
+        return non_chat_notifications
+    
+    def get_pending_chat_notifications(self):
+        """Retrieve pending notifications from Redis."""
+        notifications = cache.get(f"notifications_{self.user_id}", [])
+        chat_notifications = [notification for notification in notifications if notification.get("type") == "chat"]
+        for notification in chat_notifications:
             if notification.get("sender", {}).get("profile_pic"):
                 profile_pic_url = str(notification["sender"]["profile_pic"])
                 print(f"Profile Pic URL: {profile_pic_url}")
                 notification["sender"]["profile_pic"] = create_presigned_url(profile_pic_url)
-        print(notifications, 'notifications')
-        return notifications
+        print(chat_notifications, 'notifications')
+        return chat_notifications
     
     async def send_notification(self, event):
         notification = event["notification"] 
@@ -193,7 +207,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             {
                 'type': 'send_notification',
                 "notification": notification_data,
-                'notification_type': 'notification',
+                'notification_type': 'chat_message',
             }
         )
 

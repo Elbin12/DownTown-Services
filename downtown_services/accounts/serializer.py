@@ -116,7 +116,6 @@ class ReviewSerializer(serializers.ModelSerializer):
         return interaction.is_liked if interaction else None
     
 class OrdersListingSerializer(serializers.ModelSerializer):
-    from worker.serializer import WorkerDetailSerializer
 
     user = UserGetSerializer(source='user.user_profile', read_only = True)
     order_tracking = UserOrderTrackingSerializer(source='status_tracking',read_only = True)
@@ -146,8 +145,6 @@ class OrdersListingSerializer(serializers.ModelSerializer):
 
 
 class UserOrderSerializer(serializers.ModelSerializer):
-    from worker.serializer import WorkerDetailSerializer
-
     user = UserGetSerializer(source='user.user_profile', read_only = True)
     order_tracking = UserOrderTrackingSerializer(source='status_tracking',read_only = True)
     worker = serializers.SerializerMethodField(read_only = True)

@@ -45,7 +45,7 @@ urlpatterns = [
    path('wallet/', views.WalletView.as_view()),
    path('add-money/', views.WalletView.as_view()),
    path('capture_payment/', views.CapturePayment.as_view()),
-   path('chat/history/<int:user_id>/<int:worker_id>/', views.ChatHistoryView.as_view(), name='chat-history'),
+   path('chat/history/<int:user_id>/<int:worker_id>/<int:page_no>/', views.ChatHistoryView.as_view(), name='chat-history'),
    path('chats/', views.Chats.as_view()),
 ]
 

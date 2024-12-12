@@ -60,11 +60,13 @@ class customAuthentication(JWTAuthentication):
         header = self.get_header(request)
 
         if header is None:
-            if request.path.startswith('/worker'):
+            if request.path.startswith('/worker/'):
+                print('path', request.path)
                 raw_token = request.COOKIES.get('worker_access_token')
             elif request.path.startswith('/admin'):
                 raw_token = request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE'])
             else:
+                print('user path', request.path)
                 raw_token = request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE'])
         else:
             if 'worker' in request.path:

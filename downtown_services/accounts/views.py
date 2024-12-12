@@ -27,6 +27,7 @@ from django.db.models import Count, OuterRef, Subquery
 import requests
 from django.http import HttpResponseRedirect
 from django.contrib.auth.models import AnonymousUser
+from accounts.authenticate import customAuthentication
 
 # Create your views here.
 
@@ -490,6 +491,9 @@ class OrderView(APIView):
     def get(self, request, pk):
         try:
             order = Orders.objects.get(id=pk)
+            if order.user.id != request.user.id:
+                print('not user')
+                return Response({"error": "You do not have permission to view this order."}, status=status.HTTP_403_FORBIDDEN)
             serializer = UserOrderSerializer(order, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Requests.DoesNotExist:
@@ -518,6 +522,10 @@ class WorkerArrived(APIView):
         print(order_id, 'idddd')
         try:
             order = Orders.objects.get(id=order_id)
+            print(order.user.id, request.user.id, 'ids')
+            if order.user.id != request.user.id:
+                print('not user')
+                return Response({"error": "You do not have permission to view this order."}, status=status.HTTP_403_FORBIDDEN)
             order.status = 'working'
             order_tracking = order.status_tracking
             order_tracking.is_worker_arrived = True
@@ -700,15 +708,16 @@ class CapturePayment(APIView):
 class ChatHistoryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, user_id, worker_id):
+    def get(self, request, user_id, worker_id, page_no):
         ids = sorted([user_id, worker_id])
+        no = page_no*20
         messages = ChatMessage.objects.filter(
             sender_id__in=ids,
             recipient_id__in=ids
-        ).order_by('timestamp')
+        ).order_by('-timestamp')[(page_no-1)*20:no]
+        messages = messages[::-1]
         serializer = ChatMessageSerializer(messages, many=True, context={'request':request})
-        return Response(serializer.data)
-    
+        return Response({'messages':serializer.data, 'page_no':page_no}, status=status.HTTP_200_OK)
 
 class Chats(APIView):
     permission_classes = [permissions.IsAuthenticated]

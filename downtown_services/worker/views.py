@@ -21,7 +21,7 @@ from accounts.serializer import OrdersListingSerializer
 
 import os, json, stripe
 from datetime import datetime
-
+from accounts.tasks import send_notification
 from django.db.models import Q, OuterRef, Subquery
 # Create your views here.
 
@@ -321,8 +321,17 @@ class WorkerRequests(APIView):
                 request_obj.save()
                 if request_obj.status == 'accepted':
                     # if Orders.objects.filter(user=request_obj.user, service_provider=request_obj.worker)
+                    send_notification.delay(
+                        user_id=request_obj.user.id,
+                        message=f"Your request has been accepted by {request_obj.worker.first_name}!"
+                    )
                     order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
                     OrderTracking.objects.create(order=order)
+                else:
+                    send_notification.delay(
+                        user_id=request_obj.user.id,
+                        message=f"Your request has been rejected by {request_obj.worker.first_name}!"
+                    )
                 return Response({"message": f"Request status updated to {request_status}."}, status=status.HTTP_200_OK)
             else:
                 return Response({"error": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
@@ -459,16 +468,16 @@ class AddPayment(APIView):
 class ChatHistoryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, user_id, worker_id):
+    def get(self, request, user_id, worker_id, page_no):
         ids = sorted([user_id, worker_id])
+        no = page_no*20
         messages = ChatMessage.objects.filter(
             sender_id__in=ids,
             recipient_id__in=ids
-        ).order_by('-timestamp')[:20]
-        messages = messages[::-1]
+        ).order_by('-timestamp')[(page_no-1)*20:no]
+        messages = messages[::-1]                                                                                                                                                                                                                  
         serializer = ChatMessageSerializer(messages, many=True, context={'request':request})
-        return Response(serializer.data)
-    
+        return Response({'messages':serializer.data, 'page_no':page_no}, status=status.HTTP_200_OK)
 
 class Chats(APIView):
     permission_classes = [permissions.IsAuthenticated]
