@@ -18,4 +18,8 @@ urlpatterns = [
    path('categories/<int:pk>/', views.CategoryManage.as_view(), name='category-edit'),
    path('subcategories/', views.Subcategory.as_view(), name='subcategory-list'),
    path('subcategories/<int:pk>/', views.Subcategory.as_view(), name='subcategory-edit'),
+   path('subscriptions/', views.SubscriptionsView.as_view()),
+   path('subscription/<int:pk>/', views.SubscriptionsView.as_view()),
+   path('orders/', views.GetOrders.as_view()),
+   path('order/<int:pk>/', views.GetOrderDetails.as_view()),
 ]

@@ -2,10 +2,11 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
-from accounts.models import CustomUser
+from accounts.models import CustomUser, Orders
+from accounts.serializer import OrdersListingSerializer
 from worker.models import CustomWorker
-from .models import Categories, SubCategories
-from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer
+from .models import Categories, SubCategories, Subscription
+from .serializer import GetUsers, GetWorkers, GetCategories, SubcategorySerializer, SubscriptionsSerializer
 from accounts.views import token_generation_and_set_in_cookie
 from worker.models import Services
 from worker.serializer import ServiceSerializer
@@ -253,3 +254,66 @@ class GetService(APIView):
         except Services.DoesNotExist:
             return Response({'error':'Service not found'}, status=status.HTTP_404_NOT_FOUND)
     
+class SubscriptionsView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_object(self, pk):
+        print(pk, 'kk')
+        try:
+            return Subscription.objects.get(id=pk)
+        except Subscription.DoesNotExist:
+            return Response(f'Subscription not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request):
+        subscriptions = Subscription.objects.all()
+        serializer = SubscriptionsSerializer(subscriptions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        print(request.data, 'data')
+        serializer = SubscriptionsSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, pk):
+        print(pk, 'll', request.data)
+        subscription = self.get_object(pk)  
+        serializer = SubscriptionsSerializer(subscription, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK) 
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        print(request.data, 'ooo')
+        subscription = self.get_object(pk)
+        subscription.delete()
+        return Response(status=status.HTTP_200_OK)
+    
+class GetOrders(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        try:
+            orders = Orders.objects.all()
+            serializer = OrdersListingSerializer(orders, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error':f'{e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetOrderDetails(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, pk):
+        try:
+            order = Orders.objects.get(id=pk)
+            serializer = OrdersListingSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Orders.DoesNotExist:
+            return Response({'error':f'order not found on {pk}.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error':f'Error on {e}.'},status=status.HTTP_500_INTERNAL_SERVER_ERROR)

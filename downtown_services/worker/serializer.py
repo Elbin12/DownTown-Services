@@ -5,7 +5,7 @@ from accounts.serializer import ProfileSerializer, ReviewSerializer
 import os, json
 from datetime import datetime
 from accounts.utils import upload_fileobj_to_s3, create_presigned_url
-from admin_auth.models import Categories
+from admin_auth.models import Categories, Subscription
 from accounts.models import Review, Orders, ChatMessage, CustomUser
 from django.db.models import Avg
 
@@ -89,6 +89,12 @@ class WorkerRegisterSerializer(serializers.ModelSerializer):
 
         return worker
     
+class SubscriptionsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subscription
+        fields = ['id', 'tier_name', 'price', 'is_active', 'created_at', 'platform_fee_perc', 'service_add_limit', 'service_update_limit', 'user_requests_limit', 'analytics']
+
+    
 class WorkerLoginSerializer(serializers.ModelSerializer):
     worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
     first_name = serializers.CharField(source='worker_profile.first_name')
@@ -102,11 +108,15 @@ class WorkerLoginSerializer(serializers.ModelSerializer):
     lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
     lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
     location = serializers.CharField(source='worker_profile.location', read_only = True)
+    subscription = serializers.SerializerMethodField()
+    is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
+    is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
+
     class Meta:
         model = CustomWorker
         fields = fields = ['worker_profile_id',
             'id', 'email', 'mob', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'is_available', 'subscription', 'is_subscribed'
         ]
     
     def get_profile_pic(self, obj):
@@ -114,6 +124,9 @@ class WorkerLoginSerializer(serializers.ModelSerializer):
         if image_url:
             return image_url
         return None
+    
+    def get_subscription(self, obj):
+        return SubscriptionsSerializer(obj.worker_profile.subscription).data
 
 class WorkerDetailSerializerForUser(serializers.ModelSerializer):
     worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
@@ -130,12 +143,15 @@ class WorkerDetailSerializerForUser(serializers.ModelSerializer):
     location = serializers.CharField(source='worker_profile.location', read_only = True)
     rating = serializers.SerializerMethodField()
     reviews = serializers.SerializerMethodField()
+    subscription = serializers.SerializerMethodField()
+    is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
+    is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
 
     class Meta:
         model = CustomWorker
         fields = [
             'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating', 'subscription', 'is_subscribed', 'is_available'
         ]
 
     def validate(self, data):
@@ -164,6 +180,9 @@ class WorkerDetailSerializerForUser(serializers.ModelSerializer):
         )
         return round(average_rating, 1) if average_rating else 0
     
+    def get_subscription(self, obj):
+        return SubscriptionsSerializer(obj.worker_profile.subscription).data
+    
 
 
 class WorkerDetailSerializer(serializers.ModelSerializer):
@@ -179,12 +198,15 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     lat = serializers.DecimalField(source='worker_profile.lat',max_digits=9, decimal_places=6, read_only = True)
     lng = serializers.DecimalField(source='worker_profile.lng',max_digits=9, decimal_places=6, read_only = True)
     location = serializers.CharField(source='worker_profile.location', read_only = True)
+    subscription = serializers.SerializerMethodField()
+    is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
+    is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
 
     class Meta:
         model = CustomWorker
         fields = [
             'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location',
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'subscription', 'is_subscribed', 'is_available'
         ]
 
     def validate(self, data):
@@ -199,6 +221,9 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
         if image_url:
             return image_url
         return None
+    
+    def get_subscription(self, obj):
+        return SubscriptionsSerializer(obj.worker_profile.subscription).data
     
 class RequestsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -250,30 +275,37 @@ class ServiceSerializer(serializers.ModelSerializer):
         print(validated_data, 'validated')
         validated_data['is_active'] = True
         pic = self.context['request'].FILES.get('pic')
-        if pic:
-            file_extension = os.path.splitext(pic.name)[1]
-            current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_filename = f"{current_time_str}{file_extension}"
-            s3_file_path = f"services/{unique_filename}"
-            image_url = upload_fileobj_to_s3(pic, s3_file_path)
-            validated_data['pic'] = s3_file_path
-            print("Image URL:", image_url)
-        return Services.objects.create(**validated_data)
+        usage = worker.worker_profile.subscription_usage
+        if usage.can_add_service():
+            if pic:
+                file_extension = os.path.splitext(pic.name)[1]
+                current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                unique_filename = f"{current_time_str}{file_extension}"
+                s3_file_path = f"services/{unique_filename}"
+                image_url = upload_fileobj_to_s3(pic, s3_file_path)
+                validated_data['pic'] = s3_file_path
+                print("Image URL:", image_url)
+            return Services.objects.create(**validated_data)
+        return serializers.ValidationError({'message': 'Service addition limit reached for the subscription tier.'})
     
     def update(self, instance, validated_data):
+        worker = self.context.get('request').user
         pic = self.context.get('request').FILES.get('pic')
-        if pic:
-            file_extension = os.path.splitext(pic.name)[1]
-            current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_filename = f"{current_time_str}{file_extension}"
-            s3_file_path = f"services/{unique_filename}"
-            image_url = upload_fileobj_to_s3(pic, s3_file_path)
-            validated_data['pic'] = s3_file_path
-        for attr in ['service_name', 'description', 'category', 'subcategory', 'pic', 'price']:
-            value = validated_data.get(attr, getattr(instance, attr))
-            setattr(instance, attr, value)
-        instance.save()
-        return instance
+        usage = worker.worker_profile.subscription_usage
+        if usage.can_update_service():
+            if pic:
+                file_extension = os.path.splitext(pic.name)[1]
+                current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                unique_filename = f"{current_time_str}{file_extension}"
+                s3_file_path = f"services/{unique_filename}"
+                image_url = upload_fileobj_to_s3(pic, s3_file_path)
+                validated_data['pic'] = s3_file_path
+            for attr in ['service_name', 'description', 'category', 'subcategory', 'pic', 'price']:
+                value = validated_data.get(attr, getattr(instance, attr))
+                setattr(instance, attr, value)
+            instance.save()
+            return instance
+        return serializers.ValidationError({'message': 'Service updation limit reached for the subscription tier.'})
     
     def get_pic(self, instance):
         image_url = create_presigned_url(str(instance.pic))

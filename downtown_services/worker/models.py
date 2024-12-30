@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
 from accounts.models import CustomUserManager, CustomUser
-from admin_auth.models import Categories, SubCategories
+from admin_auth.models import Categories, SubCategories, Subscription
 import uuid
 
 # Create your models here.
@@ -40,6 +40,13 @@ class CustomWorker(AbstractBaseUser, PermissionsMixin):
     
 
 class WorkerProfile(models.Model):
+    SUBSCRIPTION_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('canceled', 'Canceled'),
+        ('expired', 'Expired'),
+        ('past_due', 'Past Due'),
+    ]
+
     user = models.OneToOneField(CustomWorker, on_delete = models.CASCADE, related_name = 'worker_profile')
     first_name = models.CharField(max_length=50, null=True, blank=True)
     last_name = models.CharField(max_length=50, null=True, blank=True)
@@ -54,10 +61,68 @@ class WorkerProfile(models.Model):
     experience = models.IntegerField(null=True, blank=True)
     certificate = models.ImageField(upload_to = 'worker/certificate/', null=True, blank=True)
     services = models.ManyToManyField(Categories, related_name='workers')
+    subscription = models.ForeignKey(Subscription, on_delete=models.CASCADE, related_name='worker_profile', null=True, blank=True)
+    is_subscribed = models.BooleanField(default=False)
+    stripe_subscription_id = models.CharField(max_length=100, null=True, blank=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
+    subscription_end_date = models.DateTimeField(null=True, blank=True)
+    is_available = models.BooleanField(default=True)
+
+    subscription_status = models.CharField( max_length=20, choices=SUBSCRIPTION_STATUS_CHOICES, default='expired')
 
     def __str__(self):
         return str(self.user.email)
     
+class SubscriptionUsage(models.Model):
+    worker_profile = models.OneToOneField(WorkerProfile, on_delete=models.CASCADE, related_name="subscription_usage")
+    services_added = models.IntegerField(default=0)
+    services_updated = models.IntegerField(default=0)
+    user_requests_handled = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def can_add_service(self):
+        # Convert subscription limit to int for comparison
+        limit = int(self.worker_profile.subscription.service_add_limit)
+        return self.services_added < limit
+
+    def can_update_service(self):
+        # Convert subscription limit to int for comparison
+        limit = int(self.worker_profile.subscription.service_update_limit)
+        return self.services_updated < limit
+
+    def can_handle_request(self):
+        # Convert subscription limit to int for comparison
+        limit = int(self.worker_profile.subscription.user_requests_limit)
+        return self.user_requests_handled < limit
+
+    def increment_services_added(self):
+        if self.can_add_service():
+            self.services_added += 1
+            self.save()
+        else:
+            raise ValueError("Service addition limit reached for the subscription tier.")
+
+    def increment_services_updated(self):
+        if self.can_update_service():
+            self.services_updated += 1
+            self.save()
+        else:
+            raise ValueError("Service update limit reached for the subscription tier.")
+
+    def increment_user_requests_handled(self):
+        if self.can_handle_request():
+            self.user_requests_handled += 1
+            self.save()
+        else:
+            raise ValueError("User request handling limit reached for the subscription tier.")
+
+    def reset_usage_counts(self):
+        """Reset all usage counts at the start of new billing cycle"""
+        self.services_added = 0
+        self.services_updated = 0
+        self.user_requests_handled = 0
+        self.save()
 
 class Services(models.Model):
     worker = models.ForeignKey(CustomWorker, on_delete=models.CASCADE, related_name='services')

@@ -19,6 +19,8 @@ from . import views
 
 
 urlpatterns = [
+    path('subscription_plans/', views.SubscriptionPlans.as_view()),
+    path('create_subscription/', views.CreateSubscription.as_view()),
     path('signup/', views.SignUp.as_view()),
     path('login/', views.Login.as_view()),
     path('profile/', views.Profile.as_view()),
@@ -38,4 +40,7 @@ urlpatterns = [
     path('wallet/', views.WalletView.as_view()),
     path('add-money/', views.WalletView.as_view()),
     path('capture_payment/', views.CapturePayment.as_view()),
+    path('dashboard/', views.Dashboard.as_view()),
+    path("payment/create-intent/", views.CreatePaymentIntentView.as_view()),
+    path("payment/success/", views.PaymentSuccessView.as_view()),
 ]

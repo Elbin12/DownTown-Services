@@ -321,7 +321,7 @@ class ServicesView(APIView):
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
 
-            services = Services.objects.filter(filters, is_active=True, is_deleted=False) if filters else Services.objects.filter(is_active=True, is_deleted=False)
+            services = Services.objects.filter(filters, is_active=True, is_deleted=False, worker__worker_profile__is_available=True) if filters else Services.objects.filter(is_active=True, is_deleted=False, worker__worker_profile__is_available=True)
             print(request.user, 'user')
             if isinstance(request.user, AnonymousUser):
                 lat = request.session.get('lat')
@@ -372,6 +372,7 @@ class ServiceDetail(APIView):
 
     def get(self, request, pk):
         try:
+            print(pk, 'pk')
             service = Services.objects.get(id=pk)
             if isinstance(request.user, AnonymousUser):
                 lat = request.session.get('lat')
@@ -408,17 +409,21 @@ class ServiceRequests(APIView):
         except Services.DoesNotExist:
             return Response({'error':'Service not found or does not belong to this worker'}, status=status.HTTP_404_NOT_FOUND)
         
-        service_request, created = Requests.objects.get_or_create(
-            user=request.user,
-            worker=worker_profile,
-            service=service,
-            defaults={'status': 'request_sent'},
-        )
-        service_request.description = description
-        service_request.status = 'request_sent'
-        service_request.save()
-        serailizer = RequestsSerializer(service_request)
-        return Response(serailizer.data, status=status.HTTP_201_CREATED)
+        usage = worker_profile.subscription_usage
+        if usage.can_handle_request():
+            service_request, created = Requests.objects.get_or_create(
+                user=request.user,
+                worker=worker_profile,
+                service=service,
+                defaults={'status': 'request_sent'},
+            )
+            service_request.description = description
+            service_request.status = 'request_sent'
+            service_request.save()
+            serailizer = RequestsSerializer(service_request)
+            return Response(serailizer.data, status=status.HTTP_201_CREATED)
+        else:
+            return Response( {'failure':'Something went wrong.'} ,status=status.HTTP_400_BAD_REQUEST)
     
 class CancelRequest(APIView):
     permission_classes = [permissions.IsAuthenticated]

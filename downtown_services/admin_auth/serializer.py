@@ -1,9 +1,10 @@
 from rest_framework import serializers
 from accounts.models import CustomUser, UserProfile
 from worker.models import CustomWorker
-from .models import Categories, SubCategories
+from .models import Categories, SubCategories, Subscription
 from worker.models import Services
 from accounts.utils import create_presigned_url
+import stripe
 
 
 class GetUsers(serializers.ModelSerializer):
@@ -152,5 +153,62 @@ class SubcategorySerializer(serializers.ModelSerializer):
         return instance
     
 
-
         
+class SubscriptionsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subscription
+        fields = ['id', 'tier_name', 'price', 'is_active', 'created_at', 'platform_fee_perc', 'service_add_limit', 'service_update_limit', 'user_requests_limit', 'analytics']
+
+    def validate(self, attrs):
+        tier_name = attrs.get('tier_name')
+        if self.instance is None:
+            if Subscription.objects.filter(tier_name=tier_name).exists():
+                raise serializers.ValidationError('A subscription with this tier name is already exist.')
+        else:
+            if Subscription.objects.filter(tier_name=tier_name).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError('A subscription with this tier name is already exist.')
+        return attrs
+    
+    def create(self, validated_data):
+        print(validated_data, 'data')
+        try:
+            product = stripe.Product.create(name=validated_data.get('tier_name'))
+            price = stripe.Price.create(
+                unit_amount=int(validated_data.get('price') * 100),
+                currency="inr",
+                recurring={"interval": "month"},
+                product=product.id,
+            )
+            validated_data['stripe_product_id'] = product.id
+            validated_data['stripe_price_id'] = price.id
+        except Exception as e:
+            return serializers.ValidationError(f'Error at stripe :{e}')
+        subscription = Subscription.objects.create(**validated_data)
+        return subscription
+    
+    def update(self, instance, validated_data):
+        print(validated_data, 'ddd')
+        tier_name = validated_data.get('tier_name', instance.tier_name)
+        price = validated_data.get('price', instance.price)
+        platform_fee_perc = validated_data.get('platform_fee_perc', instance.platform_fee_perc)
+        service_add_limit = validated_data.get('service_add_limit', instance.service_add_limit)
+        service_update_limit = validated_data.get('service_update_limit', instance.service_update_limit)
+        user_requests_limit = validated_data.get('user_requests_limit', instance.user_requests_limit)
+        analytics = validated_data.get('analytics', instance.analytics)
+
+        print(price, 'price')
+        if not tier_name:
+            raise serializers.ValidationError('Tier name cannot be null')
+        if price is None:
+            raise serializers.ValidationError('Price cannot be null')
+
+        instance.tier_name = tier_name
+        instance.price = price
+        instance.platform_fee_perc = platform_fee_perc
+        instance.service_add_limit = service_add_limit
+        instance.service_update_limit = service_update_limit
+        instance.user_requests_limit = user_requests_limit
+        instance.analytics = analytics
+        
+        instance.save()
+        return instance

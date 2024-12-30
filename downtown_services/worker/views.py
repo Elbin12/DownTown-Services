@@ -3,7 +3,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser, OrderPayment, Additional_charges
-from .models import CustomWorker, WorkerProfile, Services, Requests, Wallet, Transaction
+from .models import CustomWorker, WorkerProfile, Services, Requests, Wallet, Transaction, SubscriptionUsage
+from admin_auth.models import Subscription
+from admin_auth.serializer import SubscriptionsSerializer
 from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails, ChatMessageSerializer, WalletSerializer
 
 import jwt, datetime
@@ -277,6 +279,9 @@ class ServicesManage(APIView):
     
     def post(self, request):
         print(request.data, 'data')
+        usage = request.user.worker_profile.subscription_usage
+        if usage.can_add_service():
+            usage.increment_services_added()
         serializer = ServiceSerializer(data=request.data,  context={'request': request})
         if serializer.is_valid():
             serializer.save()
@@ -320,13 +325,18 @@ class WorkerRequests(APIView):
                 request_obj.status = request_status
                 request_obj.save()
                 if request_obj.status == 'accepted':
-                    # if Orders.objects.filter(user=request_obj.user, service_provider=request_obj.worker)
-                    send_notification.delay(
-                        user_id=request_obj.user.id,
-                        message=f"Your request has been accepted by {request_obj.worker.first_name}!"
-                    )
-                    order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
-                    OrderTracking.objects.create(order=order)
+                    usage = request.user.worker_profile.subscription_usage
+                    if usage.can_handle_request():
+                        send_notification.delay(
+                            user_id=request_obj.user.id,
+                            message=f"Your request has been accepted by {request_obj.worker.first_name}!"
+                        )
+                        order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
+                        OrderTracking.objects.create(order=order)
+                        usage.increment_user_requests_handled()
+                        usage.save()
+                    else:
+                        return Response({'failure':'User request limit reached for the subscription tier.'}, status=status.HTTP_400_BAD_REQUEST)
                 else:
                     send_notification.delay(
                         user_id=request_obj.user.id,
@@ -565,3 +575,170 @@ class CapturePayment(APIView):
             except Transaction.DoesNotExist:
                 return Response({'error':'Transaction not found'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             return Response({'error':'Something went wrong'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class SubscriptionPlans(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        subscriptions = Subscription.objects.all()
+        serializer = SubscriptionsSerializer(subscriptions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+class CreateSubscription(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            user = request.user
+            payment_method = request.data.get('payment_method_id')
+            customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.worker_profile.first_name,
+                    payment_method=payment_method,
+                )
+            
+            subscription = stripe.Subscription.create(
+                    customer=customer.id,
+                    items=[{'price': 'price_xxxx'}],
+                    expand=['latest_invoice.payment_intent'],
+                )
+            return Response({'subscriptionId': subscription.id, 'clientSecret': subscription.latest_invoice.payment_intent.client_secret}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+class Dashboard(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        worker_status = request.user.worker_profile.is_available
+        services_completed = Orders.objects.filter(service_provider=request.user, order_payment__status='paid')
+        revenue = sum([service.order_payment.total_amount for service in services_completed])
+        return Response({'status':worker_status, 'revenue':revenue}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        worker_status = request.data.get('status', None)
+        user = request.user
+        if worker_status is not None:
+            user.worker_profile.is_available = worker_status
+        user.worker_profile.save()
+        print(user.worker_profile.is_available, 'is_available')
+        return Response({'status':worker_status}, status=status.HTTP_200_OK)
+    
+
+class CreatePaymentIntentView(APIView):
+    def post(self, request):
+        try:
+            amount = request.data.get("amount")
+            currency = request.data.get("currency", "inr")
+            payment_method_id = request.data.get("payment_method_id")
+
+            if not amount:
+                return Response({"error": "Amount is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not payment_method_id:
+                return Response({"error": "Payment method ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create or retrieve customer
+            if not request.user.worker_profile.stripe_customer_id:
+                customer = stripe.Customer.create(
+                    email=request.user.email,
+                    payment_method=payment_method_id,  # Attach payment method during creation
+                )
+                request.user.worker_profile.stripe_customer_id = customer.id
+                request.user.worker_profile.save()
+            else:
+                customer = stripe.Customer.retrieve(request.user.worker_profile.stripe_customer_id)
+                # Attach new payment method to existing customer
+                stripe.PaymentMethod.attach(
+                    payment_method_id,
+                    customer=customer.id,
+                )
+
+            # Set as default payment method
+            stripe.Customer.modify(
+                customer.id,
+                invoice_settings={'default_payment_method': payment_method_id}
+            )
+
+            # Create PaymentIntent
+            payment_intent = stripe.PaymentIntent.create(
+                amount=int(float(amount) * 100),
+                currency=currency,
+                customer=customer.id,
+                payment_method=payment_method_id,
+                payment_method_types=["card"],
+                setup_future_usage='off_session'  # Important for future payments
+            )
+
+            return Response({
+                "clientSecret": payment_intent.client_secret,
+                "payment_intent_id": payment_intent.id,
+                "customer": customer
+            }, status=status.HTTP_200_OK)
+
+        except stripe.error.StripeError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"Something went wrong: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentSuccessView(APIView):
+    def post(self, request):
+        payment_intent_id = request.data.get("payment_intent_id")
+        subscription_plan_id = request.data.get("subscription_plan_id")
+        payment_method_id = request.data.get("payment_method_id")
+
+        if not all([payment_intent_id, subscription_plan_id, payment_method_id]):
+            return Response({
+                "status": "failed",
+                "error": "Missing required parameters."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            subscription_plan = Subscription.objects.get(id=subscription_plan_id)
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if payment_intent.status != "succeeded":
+                return Response({
+                    "status": "failed",
+                    "error": "Payment not successful."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create subscription with the payment method
+            subscription = stripe.Subscription.create(
+                customer=payment_intent.customer,
+                items=[{"price": subscription_plan.stripe_price_id}],
+                default_payment_method=payment_method_id,
+                expand=["latest_invoice.payment_intent"]
+            )
+
+            # Update user profile
+            request.user.worker_profile.is_subscribed = True
+            request.user.worker_profile.subscription = subscription_plan
+            request.user.worker_profile.stripe_subscription_id = subscription.id
+            request.user.worker_profile.subscription_status = subscription.status
+            request.user.worker_profile.subscription_end_date = datetime.fromtimestamp(subscription.current_period_end)
+            request.user.worker_profile.save()
+
+            SubscriptionUsage.objects.get_or_create(worker_profile=request.user.worker_profile)
+
+            return Response({
+                "status": "success",
+                "subscription": subscription
+            }, status=status.HTTP_200_OK)
+
+        except Subscription.DoesNotExist:
+            return Response({
+                "status": "failed",
+                "error": "Invalid subscription plan ID."
+            }, status=status.HTTP_404_NOT_FOUND)
+        except stripe.error.StripeError as e:
+            return Response({
+                "status": "failed",
+                "error": str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                "status": "failed",
+                "error": f"Something went wrong: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
