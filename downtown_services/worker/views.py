@@ -3,11 +3,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from accounts.models import CustomUser, OrderPayment, Additional_charges
-from .models import CustomWorker, WorkerProfile, Services, Requests, Wallet, Transaction, SubscriptionUsage
+from .models import CustomWorker, WorkerProfile, Services, Requests, Wallet, Transaction, WorkerSubscription
 from admin_auth.models import Subscription
 from admin_auth.serializer import SubscriptionsSerializer
 from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails, ChatMessageSerializer, WalletSerializer
 
+from django.utils.timezone import make_aware
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
@@ -25,6 +26,8 @@ import os, json, stripe
 from datetime import datetime
 from accounts.tasks import send_notification
 from django.db.models import Q, OuterRef, Subquery
+
+from .utils import update_subscription_plan, cancel_subscription
 # Create your views here.
 
 
@@ -279,21 +282,22 @@ class ServicesManage(APIView):
     
     def post(self, request):
         print(request.data, 'data')
-        usage = request.user.worker_profile.subscription_usage
-        if usage.can_add_service():
-            usage.increment_services_added()
+        usage = request.user.worker_profile.worker_subscription
         serializer = ServiceSerializer(data=request.data,  context={'request': request})
         if serializer.is_valid():
             serializer.save()
+            usage.increment_services_added()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def put(self, request, pk):
         print(request.data)
         service = self.get_object(pk)
+        usage = request.user.worker_profile.worker_subscription
         serializer = ServiceSerializer(service, request.data, context={'request': request}, partial=True)
         if serializer.is_valid():
             serializer.save()
+            usage.increment_services_updated()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
@@ -325,7 +329,7 @@ class WorkerRequests(APIView):
                 request_obj.status = request_status
                 request_obj.save()
                 if request_obj.status == 'accepted':
-                    usage = request.user.worker_profile.subscription_usage
+                    usage = request.user.worker_profile.worker_subscription
                     if usage.can_handle_request():
                         send_notification.delay(
                             user_id=request_obj.user.id,
@@ -376,7 +380,7 @@ class OrdersView(APIView):
             if filter_key == 'completed':
                 orders = Orders.objects.filter(service_provider=request.user, status=filter_key, order_payment__status='paid')
             elif filter_key == 'working':
-                orders = Orders.objects.filter(Q(service_provider=request.user) & Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid'))
+                orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status=filter_key) | Q(status='pending') | Q(order_payment__status='unPaid')))
             print(orders, 'ordersss')
             serializer = OrdersListingSerializer(orders, many=True, context={'request':request})
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -417,6 +421,9 @@ class WorkCompleted(APIView):
             order.status = 'completed'
             order_tracking.save()
             order.save()
+            user_profile = order.user.user_profile
+            user_profile.is_any_pending_payment = True
+            user_profile.save()
             serializer = OrdersListingSerializer(order)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
@@ -584,28 +591,6 @@ class SubscriptionPlans(APIView):
         serializer = SubscriptionsSerializer(subscriptions, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
-
-class CreateSubscription(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        try:
-            user = request.user
-            payment_method = request.data.get('payment_method_id')
-            customer = stripe.Customer.create(
-                    email=user.email,
-                    name=user.worker_profile.first_name,
-                    payment_method=payment_method,
-                )
-            
-            subscription = stripe.Subscription.create(
-                    customer=customer.id,
-                    items=[{'price': 'price_xxxx'}],
-                    expand=['latest_invoice.payment_intent'],
-                )
-            return Response({'subscriptionId': subscription.id, 'clientSecret': subscription.latest_invoice.payment_intent.client_secret}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         
 class Dashboard(APIView):
     permission_classes = [permissions.IsAdminUser]
@@ -626,27 +611,31 @@ class Dashboard(APIView):
         return Response({'status':worker_status}, status=status.HTTP_200_OK)
     
 
-class CreatePaymentIntentView(APIView):
+class CreateSubscriptionView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
     def post(self, request):
         try:
-            amount = request.data.get("amount")
-            currency = request.data.get("currency", "inr")
+            subscription_plan_id = request.data.get("subscription_plan_id")
             payment_method_id = request.data.get("payment_method_id")
 
-            if not amount:
-                return Response({"error": "Amount is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if not subscription_plan_id or not payment_method_id:
+                return Response({"error": "Missing required parameters."}, status=status.HTTP_400_BAD_REQUEST)
             
-            if not payment_method_id:
-                return Response({"error": "Payment method ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+            subscription_plan = Subscription.objects.get(id=subscription_plan_id)
 
-            # Create or retrieve customer
             if not request.user.worker_profile.stripe_customer_id:
                 customer = stripe.Customer.create(
                     email=request.user.email,
-                    payment_method=payment_method_id,  # Attach payment method during creation
+                    payment_method=payment_method_id,
                 )
                 request.user.worker_profile.stripe_customer_id = customer.id
                 request.user.worker_profile.save()
+            
+                stripe.Customer.modify(
+                    customer.id,
+                    invoice_settings={'default_payment_method': payment_method_id}
+                )
             else:
                 customer = stripe.Customer.retrieve(request.user.worker_profile.stripe_customer_id)
                 # Attach new payment method to existing customer
@@ -654,91 +643,115 @@ class CreatePaymentIntentView(APIView):
                     payment_method_id,
                     customer=customer.id,
                 )
-
-            # Set as default payment method
-            stripe.Customer.modify(
-                customer.id,
-                invoice_settings={'default_payment_method': payment_method_id}
-            )
-
-            # Create PaymentIntent
-            payment_intent = stripe.PaymentIntent.create(
-                amount=int(float(amount) * 100),
-                currency=currency,
-                customer=customer.id,
-                payment_method=payment_method_id,
-                payment_method_types=["card"],
-                setup_future_usage='off_session'  # Important for future payments
-            )
-
-            return Response({
-                "clientSecret": payment_intent.client_secret,
-                "payment_intent_id": payment_intent.id,
-                "customer": customer
-            }, status=status.HTTP_200_OK)
-
-        except stripe.error.StripeError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": f"Something went wrong: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class PaymentSuccessView(APIView):
-    def post(self, request):
-        payment_intent_id = request.data.get("payment_intent_id")
-        subscription_plan_id = request.data.get("subscription_plan_id")
-        payment_method_id = request.data.get("payment_method_id")
-
-        if not all([payment_intent_id, subscription_plan_id, payment_method_id]):
-            return Response({
-                "status": "failed",
-                "error": "Missing required parameters."
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            subscription_plan = Subscription.objects.get(id=subscription_plan_id)
-            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-
-            if payment_intent.status != "succeeded":
-                return Response({
-                    "status": "failed",
-                    "error": "Payment not successful."
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Create subscription with the payment method
+            
             subscription = stripe.Subscription.create(
-                customer=payment_intent.customer,
-                items=[{"price": subscription_plan.stripe_price_id}],
+                customer=customer.id,
+                items=[{
+                    "price": subscription_plan.stripe_price_id, 
+                }],
                 default_payment_method=payment_method_id,
-                expand=["latest_invoice.payment_intent"]
+                expand=["latest_invoice.payment_intent"],
             )
+
+            # Check if payment was successful
+            payment_intent = subscription.latest_invoice.payment_intent
+            if payment_intent.status != 'succeeded':
+                return Response({"error": "Payment failed."}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            
+            invoice_id = subscription.latest_invoice.id
+            subscription_end_date = make_aware(datetime.fromtimestamp(subscription.current_period_end))
+            worker_subscription, created = WorkerSubscription.objects.get_or_create(
+                worker_profile=request.user.worker_profile,
+                defaults={
+                    "stripe_subscription_id": subscription.id,
+                    "stripe_price_id": subscription_plan.stripe_price_id,
+                    "stripe_product_id": subscription_plan.stripe_product_id,
+                    "tier_name": subscription_plan.tier_name,
+                    "price": subscription_plan.price,
+                    "platform_fee_perc": subscription_plan.platform_fee_perc,
+                    "analytics": subscription_plan.analytics,
+                    "service_add_limit": subscription_plan.service_add_limit,
+                    "service_update_limit": subscription_plan.service_update_limit,
+                    "user_requests_limit": subscription_plan.user_requests_limit,
+                    "subscription_status": "active",
+                    "subscription_end_date": subscription_end_date,
+                    "invoice_id": invoice_id,
+                }
+            )
+
+            if not created:
+                worker_subscription.stripe_subscription_id = subscription.id
+                worker_subscription.stripe_price_id = subscription_plan.stripe_price_id,
+                worker_subscription.stripe_product_id =  subscription_plan.stripe_product_id,
+                worker_subscription.tier_name = subscription_plan.tier_name,
+                worker_subscription.price = subscription_plan.price,
+                worker_subscription.platform_fee_perc = subscription_plan.platform_fee_perc,
+                worker_subscription.analytics = subscription_plan.analytics,
+                worker_subscription.service_add_limit = subscription_plan.service_add_limit,
+                worker_subscription.service_update_limit = subscription_plan.service_update_limit,
+                worker_subscription.user_requests_limit = subscription_plan.user_requests_limit,
+                worker_subscription.subscription_status = "active"
+                worker_subscription.subscription_end_date = subscription_end_date
+                worker_subscription.invoice_id = invoice_id
+                worker_subscription.save()
 
             # Update user profile
             request.user.worker_profile.is_subscribed = True
             request.user.worker_profile.subscription = subscription_plan
-            request.user.worker_profile.stripe_subscription_id = subscription.id
-            request.user.worker_profile.subscription_status = subscription.status
-            request.user.worker_profile.subscription_end_date = datetime.fromtimestamp(subscription.current_period_end)
             request.user.worker_profile.save()
 
-            SubscriptionUsage.objects.get_or_create(worker_profile=request.user.worker_profile)
-
-            return Response({
-                "status": "success",
-                "subscription": subscription
-            }, status=status.HTTP_200_OK)
-
+            return Response({'status':'success', "message": "Subscription created successfully and payment was processed."})
         except Subscription.DoesNotExist:
-            return Response({
-                "status": "failed",
-                "error": "Invalid subscription plan ID."
-            }, status=status.HTTP_404_NOT_FOUND)
+            return Response({"status": "failed", "error": "Invalid subscription plan ID."}, status=status.HTTP_404_NOT_FOUND)
         except stripe.error.StripeError as e:
-            return Response({
-                "status": "failed",
-                "error": str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({
-                "status": "failed",
-                "error": f"Something went wrong: {str(e)}"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": f"Something went wrong: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+class SubscriptionUpgrade(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        try:
+            subscription_plan_id = request.data.get("subscription_plan_id")
+
+            if not subscription_plan_id:
+                return Response({"status": "failed", "error": "Subscription plan ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                subscription_plan = Subscription.objects.get(id=subscription_plan_id)
+            except Subscription.DoesNotExist:
+                return Response({"status": "failed", "error": "Invalid subscription plan ID."}, status=status.HTTP_404_NOT_FOUND)
+            
+            worker_profile = request.user.worker_profile
+            update_subscription_plan(worker_profile, subscription_plan)
+            return Response({'message':'Subscription upgraded successfully.'}, status=status.HTTP_200_OK)
+
+        except stripe.error.StripeError as e:
+            return Response({"status": "failed", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(e)
+            return Response({"status": "failed", "error": f"Something went wrong: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class CancelSubscription(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        try:
+            worker_profile = request.user.worker_profile
+            success = cancel_subscription(worker_profile)
+
+            if success:
+                return Response({'message': 'Subscription cancellation scheduled successfully.'}, status=status.HTTP_200_OK)
+            else:
+                return Response({'message': 'Failed to cancel subscription.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'message':f'error on {e}.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+class GetCategories(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self, request):
+        serializer = GetCategoriesOnly(Categories.objects.all(), many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

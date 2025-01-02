@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CustomWorker, Services, Requests, WorkerProfile, Wallet, Transaction
+from .models import CustomWorker, Services, Requests, WorkerProfile, Wallet, Transaction, WorkerSubscription
 from django.contrib.auth.hashers import make_password   
 from accounts.serializer import ProfileSerializer, ReviewSerializer
 import os, json
@@ -91,8 +91,8 @@ class WorkerRegisterSerializer(serializers.ModelSerializer):
     
 class SubscriptionsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Subscription
-        fields = ['id', 'tier_name', 'price', 'is_active', 'created_at', 'platform_fee_perc', 'service_add_limit', 'service_update_limit', 'user_requests_limit', 'analytics']
+        model = WorkerSubscription
+        fields = '__all__'
 
     
 class WorkerLoginSerializer(serializers.ModelSerializer):
@@ -111,22 +111,36 @@ class WorkerLoginSerializer(serializers.ModelSerializer):
     subscription = serializers.SerializerMethodField()
     is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
     is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
+    subscription_end_date = serializers.CharField(source='worker_profile.subscription_end_date', read_only = True)
+    services = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomWorker
         fields = fields = ['worker_profile_id',
             'id', 'email', 'mob', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'is_available', 'subscription', 'is_subscribed'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'is_available', 'subscription', 'is_subscribed', 'subscription_end_date',
+            'services'
         ]
     
     def get_profile_pic(self, obj):
-        image_url = create_presigned_url(str(obj.worker_profile.profile_pic))
-        if image_url:
-            return image_url
+        if obj.worker_profile.profile_pic:
+            image_url = create_presigned_url(str(obj.worker_profile.profile_pic))
+            if image_url:
+                return image_url
+            return None
         return None
     
     def get_subscription(self, obj):
-        return SubscriptionsSerializer(obj.worker_profile.subscription).data
+        try:
+            subscription = obj.worker_profile.worker_subscription
+            return SubscriptionsSerializer(subscription).data
+        except WorkerProfile.worker_subscription.RelatedObjectDoesNotExist:
+            return None
+        
+    def get_services(self, obj):
+        services = obj.worker_profile.services.all()
+        return [{'id': service.id, 'name': service.category_name} for service in services]
+
 
 class WorkerDetailSerializerForUser(serializers.ModelSerializer):
     worker_profile_id = serializers.IntegerField(source='worker_profile.id', read_only=True)
@@ -146,12 +160,14 @@ class WorkerDetailSerializerForUser(serializers.ModelSerializer):
     subscription = serializers.SerializerMethodField()
     is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
     is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
+    subscription_end_date = serializers.CharField(source='worker_profile.subscription_end_date', read_only = True)
+
 
     class Meta:
         model = CustomWorker
         fields = [
             'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating', 'subscription', 'is_subscribed', 'is_available'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'reviews', 'rating', 'subscription', 'is_subscribed', 'is_available', 'subscription_end_date'
         ]
 
     def validate(self, data):
@@ -181,7 +197,11 @@ class WorkerDetailSerializerForUser(serializers.ModelSerializer):
         return round(average_rating, 1) if average_rating else 0
     
     def get_subscription(self, obj):
-        return SubscriptionsSerializer(obj.worker_profile.subscription).data
+        try:
+            subscription = obj.worker_profile.worker_subscription
+            return SubscriptionsSerializer(subscription).data
+        except WorkerProfile.worker_subscription.RelatedObjectDoesNotExist:
+            return None
     
 
 
@@ -201,12 +221,14 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
     subscription = serializers.SerializerMethodField()
     is_subscribed = serializers.CharField(source='worker_profile.is_subscribed', read_only = True)
     is_available = serializers.CharField(source='worker_profile.is_available', read_only = True)
+    subscription_end_date = serializers.CharField(source='worker_profile.subscription_end_date', read_only = True)
+    services = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomWorker
         fields = [
             'worker_profile_id', 'id', 'email', 'mob', 'status', 'is_active', 'isWorker', 'date_joined',
-            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'subscription', 'is_subscribed', 'is_available'
+            'first_name', 'last_name', 'dob', 'gender', 'profile_pic', 'lat', 'lng', 'location', 'subscription', 'is_subscribed', 'is_available', 'subscription_end_date', 'services'
         ]
 
     def validate(self, data):
@@ -223,7 +245,16 @@ class WorkerDetailSerializer(serializers.ModelSerializer):
         return None
     
     def get_subscription(self, obj):
-        return SubscriptionsSerializer(obj.worker_profile.subscription).data
+        try:
+            subscription = obj.worker_profile.worker_subscription
+            return SubscriptionsSerializer(subscription).data
+        except WorkerProfile.worker_subscription.RelatedObjectDoesNotExist:
+            return None
+        
+    def get_services(self, obj):
+        services = obj.worker_profile.services.all()
+        return [{'id': service.id, 'name': service.category_name} for service in services]
+
     
 class RequestsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -275,7 +306,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         print(validated_data, 'validated')
         validated_data['is_active'] = True
         pic = self.context['request'].FILES.get('pic')
-        usage = worker.worker_profile.subscription_usage
+        usage = worker.worker_profile.worker_subscription
         if usage.can_add_service():
             if pic:
                 file_extension = os.path.splitext(pic.name)[1]
@@ -291,7 +322,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         worker = self.context.get('request').user
         pic = self.context.get('request').FILES.get('pic')
-        usage = worker.worker_profile.subscription_usage
+        usage = worker.worker_profile.worker_subscription
         if usage.can_update_service():
             if pic:
                 file_extension = os.path.splitext(pic.name)[1]

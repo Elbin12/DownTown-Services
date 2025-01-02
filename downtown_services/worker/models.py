@@ -40,13 +40,6 @@ class CustomWorker(AbstractBaseUser, PermissionsMixin):
     
 
 class WorkerProfile(models.Model):
-    SUBSCRIPTION_STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('canceled', 'Canceled'),
-        ('expired', 'Expired'),
-        ('past_due', 'Past Due'),
-    ]
-
     user = models.OneToOneField(CustomWorker, on_delete = models.CASCADE, related_name = 'worker_profile')
     first_name = models.CharField(max_length=50, null=True, blank=True)
     last_name = models.CharField(max_length=50, null=True, blank=True)
@@ -63,40 +56,72 @@ class WorkerProfile(models.Model):
     services = models.ManyToManyField(Categories, related_name='workers')
     subscription = models.ForeignKey(Subscription, on_delete=models.CASCADE, related_name='worker_profile', null=True, blank=True)
     is_subscribed = models.BooleanField(default=False)
-    stripe_subscription_id = models.CharField(max_length=100, null=True, blank=True)
     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
-    subscription_end_date = models.DateTimeField(null=True, blank=True)
     is_available = models.BooleanField(default=True)
-
-    subscription_status = models.CharField( max_length=20, choices=SUBSCRIPTION_STATUS_CHOICES, default='expired')
 
     def __str__(self):
         return str(self.user.email)
-    
-class SubscriptionUsage(models.Model):
-    worker_profile = models.OneToOneField(WorkerProfile, on_delete=models.CASCADE, related_name="subscription_usage")
+
+class WorkerSubscription(models.Model):
+    SUBSCRIPTION_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('canceled', 'Canceled'),
+        ('expired', 'Expired'),
+        ('past_due', 'Past Due'),
+    ]
+
+    worker_profile = models.OneToOneField(WorkerProfile, on_delete=models.CASCADE, related_name='worker_subscription')
+    stripe_subscription_id = models.CharField(max_length=100, null=True, blank=True)
+    invoice_id = models.CharField(max_length=255, null=True, blank=True)
+
+    #subscription details
+    stripe_price_id = models.CharField(max_length=255, null=True)
+    stripe_product_id = models.CharField(max_length=255, null=True) 
+    tier_name = models.CharField(max_length=255)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    #subscription features
+    platform_fee_perc = models.IntegerField(default=1)
+    analytics = models.CharField(max_length=20)
+    service_add_limit = models.IntegerField(default=0)
+    service_update_limit = models.IntegerField(default=0)
+    user_requests_limit = models.IntegerField(default=0)
+
+    subscription_status = models.CharField(
+        max_length=20,
+        choices=SUBSCRIPTION_STATUS_CHOICES,
+        default='expired'
+    )
+    subscription_start_date = models.DateTimeField(auto_now_add=True)
+    subscription_end_date = models.DateTimeField(null=True, blank=True)
+
     services_added = models.IntegerField(default=0)
     services_updated = models.IntegerField(default=0)
     user_requests_handled = models.IntegerField(default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def can_add_service(self):
-        # Convert subscription limit to int for comparison
-        limit = int(self.worker_profile.subscription.service_add_limit)
-        return self.services_added < limit
+        """Check if the worker can add more services."""
+        if self.subscription_status != 'expired':
+            return self.services_added < self.service_add_limit
+        return False
 
     def can_update_service(self):
-        # Convert subscription limit to int for comparison
-        limit = int(self.worker_profile.subscription.service_update_limit)
-        return self.services_updated < limit
+        """Check if the worker can update more services."""
+        if self.subscription_status != 'expired':
+            return self.services_updated < self.service_update_limit
+        return False
 
     def can_handle_request(self):
-        # Convert subscription limit to int for comparison
-        limit = int(self.worker_profile.subscription.user_requests_limit)
-        return self.user_requests_handled < limit
+        """Check if the worker can handle more user requests."""
+        if self.subscription_status != 'expired':
+            return self.user_requests_handled < self.user_requests_limit
+        return False
 
     def increment_services_added(self):
+        """Increment the count of services added if within the limit."""
         if self.can_add_service():
             self.services_added += 1
             self.save()
@@ -104,6 +129,7 @@ class SubscriptionUsage(models.Model):
             raise ValueError("Service addition limit reached for the subscription tier.")
 
     def increment_services_updated(self):
+        """Increment the count of services updated if within the limit."""
         if self.can_update_service():
             self.services_updated += 1
             self.save()
@@ -111,6 +137,7 @@ class SubscriptionUsage(models.Model):
             raise ValueError("Service update limit reached for the subscription tier.")
 
     def increment_user_requests_handled(self):
+        """Increment the count of user requests handled if within the limit."""
         if self.can_handle_request():
             self.user_requests_handled += 1
             self.save()
@@ -118,11 +145,12 @@ class SubscriptionUsage(models.Model):
             raise ValueError("User request handling limit reached for the subscription tier.")
 
     def reset_usage_counts(self):
-        """Reset all usage counts at the start of new billing cycle"""
+        """Reset all usage counts at the start of a new billing cycle."""
         self.services_added = 0
         self.services_updated = 0
         self.user_requests_handled = 0
         self.save()
+
 
 class Services(models.Model):
     worker = models.ForeignKey(CustomWorker, on_delete=models.CASCADE, related_name='services')

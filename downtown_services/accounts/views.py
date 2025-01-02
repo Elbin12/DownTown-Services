@@ -409,8 +409,8 @@ class ServiceRequests(APIView):
         except Services.DoesNotExist:
             return Response({'error':'Service not found or does not belong to this worker'}, status=status.HTTP_404_NOT_FOUND)
         
-        usage = worker_profile.subscription_usage
-        if usage.can_handle_request():
+        worker_subscription = worker_profile.worker_subscription
+        if worker_subscription.can_handle_request():
             service_request, created = Requests.objects.get_or_create(
                 user=request.user,
                 worker=worker_profile,
@@ -599,6 +599,9 @@ class PaymentSuccess(APIView):
             order.order_payment.status = 'paid'
             order.order_payment.save()
             order.save()
+            user_profile = request.user.user_profile
+            user_profile.is_any_pending_payment = False
+            user_profile.save()
             request_obj = order.request
             request_obj.status = 'completed'
             request_obj.save()
