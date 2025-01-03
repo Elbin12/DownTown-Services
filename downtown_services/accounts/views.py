@@ -5,8 +5,6 @@ from rest_framework import status, permissions
 from django.core.mail import send_mail
 
 from .models import CustomUser, UserProfile, Orders, OrderTracking, Review, Interactions, Wallet, Transaction, ChatMessage
-
-import random
 from django.conf import settings
 
 import jwt, datetime
@@ -19,7 +17,7 @@ from worker.models import Services, CustomWorker, WorkerProfile, Requests
 
 from .tasks import send_mail_task
 from django.db.models import Q, Max
-from .utils import upload_fileobj_to_s3, create_presigned_url, AuthenticateIfJWTProvided, find_distance, find_distance_for_anonymoususer, get_nearby_services, get_nearby_services_for_anonymoususer
+from .utils import upload_fileobj_to_s3, create_presigned_url, AuthenticateIfJWTProvided, find_distance, find_distance_for_anonymoususer, get_nearby_services, get_nearby_services_for_anonymoususer, generate_otp
 
 import os, stripe
 from datetime import datetime
@@ -64,11 +62,6 @@ def send_email(request, email, mob=None):
     )
     print('otp', otp)
     
-
-
-def generate_otp():
-    otp = random.randint(100000, 999999)
-    return otp
 
 def token_generation_and_set_in_cookie(user, additional_data=None):
     refresh = RefreshToken.for_user(user)
@@ -316,12 +309,12 @@ class ServicesView(APIView):
     def get(self, request):
         try:
             search_key = request.query_params.get('search_key', None)
-            services = Services.objects.filter(is_active=True, is_deleted=False)
+            services = Services.objects.filter(is_active=True, is_listed=True)
             filters = Q()
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
 
-            services = Services.objects.filter(filters, is_active=True, is_deleted=False, worker__worker_profile__is_available=True) if filters else Services.objects.filter(is_active=True, is_deleted=False, worker__worker_profile__is_available=True)
+            services = Services.objects.filter(filters, is_active=True, is_listed=True, worker__worker_profile__is_available=True) if filters else Services.objects.filter(is_active=True, is_listed=True, worker__worker_profile__is_available=True)
             print(request.user, 'user')
             if isinstance(request.user, AnonymousUser):
                 lat = request.session.get('lat')
@@ -346,7 +339,7 @@ class ServicesView(APIView):
             if search_key:
                 filters |= Q(service_name__istartswith=search_key) | Q(category__category_name__istartswith=search_key)
             print('ser', search_key, request.user)
-            services = Services.objects.filter(filters, is_active=True, is_deleted=False) if filters else Services.objects.filter(is_active=True, is_deleted=False)
+            services = Services.objects.filter(filters, is_active=True, is_listed=True) if filters else Services.objects.filter(is_active=True, is_listed=True)
             selected = request.data.get('selected_sub')
             services_q = Q()
             for key, items in selected.items():
@@ -399,6 +392,8 @@ class ServiceRequests(APIView):
         worker_id = request.data.get('worker_id')
         service_id = request.data.get('service_id')
         description = request.data.get('description')
+        if request.user.user_profile.is_any_pending_payment:
+            return Response({'message':'Complete pending payment to make another request.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             worker = CustomWorker.objects.get(id=worker_id)
             print(worker, 'worker')
@@ -410,7 +405,7 @@ class ServiceRequests(APIView):
             return Response({'error':'Service not found or does not belong to this worker'}, status=status.HTTP_404_NOT_FOUND)
         
         worker_subscription = worker_profile.worker_subscription
-        if worker_subscription.can_handle_request():
+        if worker_subscription.can_handle_request() and worker_subscription.subscription_status != 'expired':
             service_request, created = Requests.objects.get_or_create(
                 user=request.user,
                 worker=worker_profile,
@@ -503,6 +498,11 @@ class OrderView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Requests.DoesNotExist:
             return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+        
+class ReportOrder(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+
         
 class FindOrderFromRequest(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -599,12 +599,15 @@ class PaymentSuccess(APIView):
             order.order_payment.status = 'paid'
             order.order_payment.save()
             order.save()
-            user_profile = request.user.user_profile
+            user_profile = order.user.user_profile
             user_profile.is_any_pending_payment = False
             user_profile.save()
             request_obj = order.request
             request_obj.status = 'completed'
             request_obj.save()
+            wallet = order.service_provider.wallet
+            amount = order.service_price - (order.service_price* (order.service_provider.worker_profile.worker_subscription.platform_fee_perc/100))
+            wallet.add_balance(amount)
             frontend_url = f"http://localhost:3000/payment/success/{pk}/"
             return HttpResponseRedirect(frontend_url)
         except Orders.DoesNotExist:

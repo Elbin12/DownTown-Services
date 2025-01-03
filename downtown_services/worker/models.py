@@ -164,6 +164,7 @@ class Services(models.Model):
     price = models.IntegerField()
     is_active = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
+    is_listed = models.BooleanField(default=True)
     
 class Requests(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='request')

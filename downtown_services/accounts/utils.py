@@ -1,7 +1,7 @@
 import logging
 import boto3
 from botocore.exceptions import ClientError
-import os
+import random
 from django.conf import settings
 
 from rest_framework.permissions import BasePermission
@@ -118,3 +118,7 @@ def get_nearby_services_for_anonymoususer(lat, lng, services):
         if distance <= 10:
             new_services.append(service)
     return new_services
+
+def generate_otp():
+    otp = random.randint(100000, 999999)
+    return otp

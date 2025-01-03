@@ -80,6 +80,8 @@ class Orders(models.Model):
     service_price = models.DecimalField(max_digits=10, decimal_places=2)
     service_image_url = models.URLField(max_length=500)
 
+    otp = models.IntegerField()
+
     user_description = models.TextField(null=True)
 
     STATUS_CHOICES = [

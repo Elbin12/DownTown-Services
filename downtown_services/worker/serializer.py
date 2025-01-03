@@ -283,7 +283,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Services
-        fields = ['workerProfile', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'is_active', 'status' ]
+        fields = ['workerProfile', 'id', 'worker', 'service_name', 'description','category', 'subcategory', 'category_name', 'subcategory_name', 'pic', 'price', 'is_active', 'status', 'is_listed' ]
         read_only_fields = ['worker']
     
     def validate(self, attrs):

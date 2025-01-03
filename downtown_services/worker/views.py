@@ -8,7 +8,7 @@ from admin_auth.models import Subscription
 from admin_auth.serializer import SubscriptionsSerializer
 from .serializer import WorkerRegisterSerializer, WorkerLoginSerializer, ServiceSerializer, ServiceListingSerializer, RequestListingDetails, ChatMessageSerializer, WalletSerializer
 
-from django.utils.timezone import make_aware
+from django.utils.timezone import make_aware, now, timedelta
 import jwt, datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
@@ -18,14 +18,14 @@ from admin_auth.models import Categories
 
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from accounts.utils import upload_fileobj_to_s3
-from accounts.models import Orders, OrderTracking, ChatMessage
+from accounts.utils import upload_fileobj_to_s3, generate_otp
+from accounts.models import Orders, OrderTracking, ChatMessage, Review
 from accounts.serializer import OrdersListingSerializer
 
 import os, json, stripe
 from datetime import datetime
 from accounts.tasks import send_notification
-from django.db.models import Q, OuterRef, Subquery
+from django.db.models import Q, OuterRef, Subquery, Avg, Sum
 
 from .utils import update_subscription_plan, cancel_subscription
 # Create your views here.
@@ -276,7 +276,7 @@ class ServicesManage(APIView):
             return Response(f'service not found on {pk}', status=status.HTTP_404_NOT_FOUND)
 
     def get(self, request):
-        services = Services.objects.filter(worker=request.user, is_deleted=False)
+        services = Services.objects.filter(worker=request.user).order_by('-created_at')
         serializer = ServiceListingSerializer(services, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -303,7 +303,7 @@ class ServicesManage(APIView):
     
     def delete(self, request, pk):
         service = self.get_object(pk)
-        service.is_deleted = True
+        service.is_listed = True if service.is_listed == False else False
         service.save()
         return Response(status=status.HTTP_200_OK)
 
@@ -335,7 +335,12 @@ class WorkerRequests(APIView):
                             user_id=request_obj.user.id,
                             message=f"Your request has been accepted by {request_obj.worker.first_name}!"
                         )
-                        order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description)
+                        otp = generate_otp()
+                        send_notification.delay(
+                            user_id=request_obj.user.id,
+                            message=f"{otp} Show this otp to worker when the worker {request_obj.worker.first_name} arrives"
+                        )
+                        order = Orders.objects.create(user=request_obj.user, service_provider=request_obj.worker.user, request=request_obj, service_name = request_obj.service.service_name, service_description=request_obj.service.description, service_price=request_obj.service.price, service_image_url=request_obj.service.pic, user_description=request_obj.description, otp=otp)
                         OrderTracking.objects.create(order=order)
                         usage.increment_user_requests_handled()
                         usage.save()
@@ -392,7 +397,7 @@ class AcceptedServices(APIView):
 
     def get(self, request):
         print(request.user, 'user')
-        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working') | (Q(status='completed') & Q(order_payment__status='unPaid'))))
+        uncompleted_orders = Orders.objects.filter(Q(service_provider=request.user) & (Q(status='pending') | Q(status='working') | (Q(status='completed') & Q(order_payment__status='unPaid')))).order_by('-created_at')
         accepted_requests = Requests.objects.filter(worker=request.user.worker_profile, status='accepted')
         serializer = OrdersListingSerializer(uncompleted_orders, many=True, context={'request':request})
         print('hi', uncompleted_orders)
@@ -408,6 +413,32 @@ class AcceptedService(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Orders.DoesNotExist:
             return Response(f'order not found on {pk}', status=status.HTTP_404_NOT_FOUND)
+
+class CheckOTP(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        order_id = request.data.get('order_id')
+        otp = int(request.data.get('otp'))
+        print(order_id, 'idddd')
+        try:
+            order = Orders.objects.get(id=order_id)
+            if otp == order.otp:
+                order.status = 'working'
+                order_tracking = order.status_tracking
+                order_tracking.is_worker_arrived = True
+                order_tracking.arrival_time = datetime.now()
+                order_tracking.work_start_time = datetime.now()
+                order_tracking.is_work_started = True
+                order_tracking.save()
+                order.save()
+                serializer = OrdersListingSerializer(order, context={'request':request})
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+        except Orders.DoesNotExist:
+            return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        except OrderTracking.DoesNotExist:
+            return Response({"error": "Order tracking data not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class WorkCompleted(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -591,6 +622,26 @@ class SubscriptionPlans(APIView):
         serializer = SubscriptionsSerializer(subscriptions, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
+def get_sales_chart_data(request):
+    today = now().date()
+    labels = [(today - timedelta(days=i)).strftime("%d-%m-%Y") for i in range(6, -1, -1)]
+    
+    # Calculate daily order counts for the last 7 days
+    orders_last_week = []
+    revenue_last_week = []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        orders_count = Orders.objects.filter(service_provider= request.user, created_at__date=day).count()
+        revenue_sum = (
+            OrderPayment.objects.filter(order__service_provider=request.user, order__created_at__date=day)
+            .aggregate(total=Sum('total_amount'))['total'] or 0
+        )
+        orders_last_week.append(orders_count)
+        revenue_last_week.append(revenue_sum)
+
+    return orders_last_week, revenue_last_week, labels
+
+    
         
 class Dashboard(APIView):
     permission_classes = [permissions.IsAdminUser]
@@ -599,7 +650,18 @@ class Dashboard(APIView):
         worker_status = request.user.worker_profile.is_available
         services_completed = Orders.objects.filter(service_provider=request.user, order_payment__status='paid')
         revenue = sum([service.order_payment.total_amount for service in services_completed])
-        return Response({'status':worker_status, 'revenue':revenue}, status=status.HTTP_200_OK)
+        # Count completed orders
+        services_count = services_completed.count()
+
+        # Calculate average rating
+        reviews = Review.objects.filter(order__service_provider=request.user)
+        average_rating = reviews.aggregate(Avg('rating')).get('rating__avg', 0) or 0
+        feedback = reviews.values('review', 'rating', 'created_at')[:5]
+
+        orders_last_week, revenue_last_week, labels = get_sales_chart_data(request)
+
+        return Response({'status':worker_status, 'revenue':revenue, 'services_count':services_count, 'average_rating':average_rating, 'feedback': feedback,
+                         'orders_last_week':orders_last_week, 'revenue_last_week':revenue_last_week, 'labels':labels }, status=status.HTTP_200_OK)
 
     def post(self, request):
         worker_status = request.data.get('status', None)
@@ -700,7 +762,7 @@ class CreateSubscriptionView(APIView):
             request.user.worker_profile.subscription = subscription_plan
             request.user.worker_profile.save()
 
-            return Response({'status':'success', "message": "Subscription created successfully and payment was processed."})
+            return Response({'status':'success', "message": "Subscription created successfully and payment was processed.", 'worker_info':WorkerDetailSerializer(request.user).data})
         except Subscription.DoesNotExist:
             return Response({"status": "failed", "error": "Invalid subscription plan ID."}, status=status.HTTP_404_NOT_FOUND)
         except stripe.error.StripeError as e:
@@ -726,7 +788,7 @@ class SubscriptionUpgrade(APIView):
             
             worker_profile = request.user.worker_profile
             update_subscription_plan(worker_profile, subscription_plan)
-            return Response({'message':'Subscription upgraded successfully.'}, status=status.HTTP_200_OK)
+            return Response({'message':'Subscription upgraded successfully.', 'worker_info':WorkerDetailSerializer(request.user).data}, status=status.HTTP_200_OK)
 
         except stripe.error.StripeError as e:
             return Response({"status": "failed", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -755,3 +817,5 @@ class GetCategories(APIView):
     def get(self, request):
         serializer = GetCategoriesOnly(Categories.objects.all(), many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+

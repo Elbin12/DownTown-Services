@@ -49,7 +49,7 @@ class UserGetSerializer(serializers.ModelSerializer):
     profile_pic = serializers.SerializerMethodField()
     class Meta:
         model = UserProfile
-        fields = ['id', 'email', 'mob', 'first_name', 'last_name', 'dob','lat', 'lng', 'location', 'gender', 'profile_pic', 'is_Active', 'is_Admin']
+        fields = ['id', 'email', 'mob', 'first_name', 'last_name', 'dob','lat', 'lng', 'location', 'gender', 'profile_pic', 'is_Active', 'is_Admin', 'is_any_pending_payment']
     
     def get_profile_pic(self, obj):
         image_url = create_presigned_url(str(obj.profile_pic))
@@ -157,7 +157,7 @@ class UserOrderSerializer(serializers.ModelSerializer):
     user_review = ReviewSerializer(source='review', many=True, read_only=True)
     class Meta:
         model = Orders
-        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details', 'user_review']
+        fields = ['id', 'user', 'worker', 'order_tracking', 'service_name', 'service_description', 'service_price', 'status', 'service_image', 'user_description', 'created_at', 'payment_details', 'user_review', 'otp']
 
     def get_service_image(self, instance):
         image_url = create_presigned_url(str(instance.service_image_url))
